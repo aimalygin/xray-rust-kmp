@@ -71,6 +71,8 @@ public val XrayProtocol.importRoute: XrayImportRoute
 
 /** Platform importer for links the core cannot import yet (VLESS today). */
 public fun interface XrayLinkImporter {
+    // @Throws lets a Swift importer throw; its NSError arrives as a Kotlin exception.
+    @Throws(Exception::class)
     public fun import(text: String, name: String?): XrayProfile
 }
 
@@ -108,12 +110,13 @@ public class XrayProfiles internal constructor(
         }
     }
 
-    // Import errors may quote credentials, so only the type survives into the message.
+    // Import errors may quote credentials, so only the type survives into the message. Exception, not
+    // RuntimeException: an error thrown by a Swift importer arrives as ObjCErrorException.
     private inline fun importWith(block: () -> XrayProfile): Result<XrayProfile> = try {
         Result.success(block())
     } catch (error: XrayImportException) {
         Result.failure(error)
-    } catch (error: RuntimeException) {
+    } catch (error: Exception) {
         Result.failure(
             XrayImportException(XrayImportException.Reason.Rejected, "import rejected: ${error::class.simpleName}", error),
         )

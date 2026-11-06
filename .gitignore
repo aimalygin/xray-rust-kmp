@@ -8,3 +8,8 @@ local.properties
 captures/
 xcuserdata/
 *.xcworkspace/xcuserdata/
+samples/ios/*.xcodeproj/
+samples/ios/App/Info.plist
+samples/ios/App/App.entitlements
+samples/ios/PacketTunnel/Info.plist
+samples/ios/PacketTunnel/PacketTunnel.entitlements
