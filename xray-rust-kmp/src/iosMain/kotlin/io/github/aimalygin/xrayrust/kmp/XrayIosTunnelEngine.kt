@@ -37,8 +37,6 @@ import platform.NetworkExtension.NEVPNStatusReasserting
 import platform.NetworkExtension.NETunnelProviderManager
 import platform.NetworkExtension.NETunnelProviderProtocol
 import platform.darwin.NSObjectProtocol
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -69,7 +67,7 @@ public class XrayIosTunnelEngine(
         this(providerBundleIdentifier, configStore, localizedDescription, MainScope())
 
     private val engineEvents = MutableSharedFlow<XrayEngineEvent>(extraBufferCapacity = EVENT_BUFFER)
-    override val events: Flow<XrayEngineEvent> get() = engineEvents
+    override val events: Flow<XrayEngineEvent> = engineEvents
 
     /** `NEVPNStatus` of the managed connection, updated from `NEVPNStatusDidChangeNotification`. */
     public val status: StateFlow<XrayVpnStatus>
@@ -141,7 +139,8 @@ public class XrayIosTunnelEngine(
         if (connection.status.toXrayVpnStatus() in inactiveStatuses) return
         connection.stopVPNTunnel()
         // withTimeout would end start() as a silent cancellation; this becomes a reported failure.
-        withTimeoutOrNull(STOP_TIMEOUT) { status.first { it in inactiveStatuses } } ?: throw PreviousSessionStopTimeoutException()
+        withTimeoutOrNull(STOP_TIMEOUT) { status.first { it in inactiveStatuses } }
+            ?: throw PreviousSessionStopTimeoutException()
     }
 
     private fun observeStatus() {
@@ -168,16 +167,20 @@ public class XrayIosTunnelEngine(
     }
 
     private fun onDisconnected(connection: NEVPNConnection) {
-        val previous = phase
-        when (previous) {
+        when (val previous = phase) {
             Phase.Idle, Phase.Preparing -> return
             Phase.Stopping -> emit(XrayEngineEvent.Stopped(generation))
             Phase.Launched, Phase.Running -> {
                 val kind = if (previous == Phase.Running) TunnelFailure.Kind.Fatal else TunnelFailure.Kind.StartFailed
                 val session = generation
                 connection.lastDisconnectError { error ->
-                    val event = error?.let { XrayEngineEvent.Failed(session, TunnelFailure(kind, it.failureText())) }
-                    emit(event ?: XrayEngineEvent.Stopped(session))
+                    emit(
+                        if (error != null) {
+                            XrayEngineEvent.Failed(session, TunnelFailure(kind, error.failureText()))
+                        } else {
+                            XrayEngineEvent.Stopped(session)
+                        },
+                    )
                 }
             }
         }
@@ -191,15 +194,16 @@ public class XrayIosTunnelEngine(
     private enum class Phase { Idle, Preparing, Launched, Running, Stopping }
 
     private companion object {
-        // XrayTunnelProviderMessage.providerConfigReferenceKey / configReferenceOptionKey at xray-rust-mobile 0.9.0.
-        const val PROVIDER_CONFIG_REFERENCE_KEY = "configReference"
-        const val OPTION_CONFIG_REFERENCE_KEY = "xrayConfigReference"
         const val EVENT_BUFFER = 16
         val STOP_TIMEOUT = 10.seconds
         val inactiveStatuses = setOf(XrayVpnStatus.Disconnected, XrayVpnStatus.Invalid)
         val reboundProtocols = setOf(XrayProtocol.Hysteria2, XrayProtocol.Wireguard)
     }
 }
+
+// XrayTunnelProviderMessage.providerConfigReferenceKey / configReferenceOptionKey at xray-rust-mobile 0.9.0.
+private const val PROVIDER_CONFIG_REFERENCE_KEY = "configReference"
+private const val OPTION_CONFIG_REFERENCE_KEY = "xrayConfigReference"
 
 private val NETunnelProviderManager.tunnelProtocol: NETunnelProviderProtocol?
     get() = protocolConfiguration as? NETunnelProviderProtocol
@@ -208,7 +212,7 @@ private val NETunnelProviderManager.providerBundleId: String?
     get() = tunnelProtocol?.providerBundleIdentifier
 
 private val NETunnelProviderManager.configReference: String?
-    get() = tunnelProtocol?.providerConfiguration?.get("configReference") as? String
+    get() = tunnelProtocol?.providerConfiguration?.get(PROVIDER_CONFIG_REFERENCE_KEY) as? String
 
 private fun NEVPNStatus.toXrayVpnStatus(): XrayVpnStatus = when (this) {
     NEVPNStatusDisconnected -> XrayVpnStatus.Disconnected
@@ -230,24 +234,20 @@ private fun NSError.failureText(): String = "$domain#$code"
 
 private suspend fun loadManagers(): List<NETunnelProviderManager> = suspendCancellableCoroutine { continuation ->
     NETunnelProviderManager.loadAllFromPreferencesWithCompletionHandler { managers, error ->
-        if (error != null) {
-            continuation.resumeWithException(NetworkExtensionException(error))
-        } else {
-            continuation.resume(managers.orEmpty().filterIsInstance<NETunnelProviderManager>())
-        }
+        continuation.resumeWith(error.toResult { managers.orEmpty().filterIsInstance<NETunnelProviderManager>() })
     }
 }
 
 private suspend fun NETunnelProviderManager.awaitSave() = suspendCancellableCoroutine { continuation ->
-    saveToPreferencesWithCompletionHandler { error -> continuation.resumeWith(error.toUnitResult()) }
+    saveToPreferencesWithCompletionHandler { error -> continuation.resumeWith(error.toResult { Unit }) }
 }
 
 private suspend fun NETunnelProviderManager.awaitLoad() = suspendCancellableCoroutine { continuation ->
-    loadFromPreferencesWithCompletionHandler { error -> continuation.resumeWith(error.toUnitResult()) }
+    loadFromPreferencesWithCompletionHandler { error -> continuation.resumeWith(error.toResult { Unit }) }
 }
 
-private fun NSError?.toUnitResult(): Result<Unit> =
-    if (this == null) Result.success(Unit) else Result.failure(NetworkExtensionException(this))
+private inline fun <T> NSError?.toResult(value: () -> T): Result<T> =
+    if (this == null) Result.success(value()) else Result.failure(NetworkExtensionException(this))
 
 private fun NEVPNConnection.startTunnel(options: Map<Any?, *>) = memScoped {
     val error = alloc<ObjCObjectVar<NSError?>>()
@@ -257,10 +257,9 @@ private fun NEVPNConnection.startTunnel(options: Map<Any?, *>) = memScoped {
 }
 
 // fetchLastDisconnectError is iOS 16+; older systems report a plain stop.
-private fun NEVPNConnection.lastDisconnectError(onResult: (NSError?) -> Unit) {
+private fun NEVPNConnection.lastDisconnectError(onResult: (NSError?) -> Unit) =
     if (respondsToSelector(NSSelectorFromString("fetchLastDisconnectErrorWithCompletionHandler:"))) {
         fetchLastDisconnectErrorWithCompletionHandler(onResult)
     } else {
         onResult(null)
     }
-}

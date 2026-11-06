@@ -47,7 +47,7 @@ internal actual fun platformCoreImporter(): XrayCoreImporter = XrayCoreImporter 
     val request = buildJsonObject {
         put("format", format)
         put("text", text)
-        name?.let { put("name", it) }
+        if (name != null) put("name", name)
     }.toString().encodeToByteArray()
     val response = try {
         nativeImport(request)

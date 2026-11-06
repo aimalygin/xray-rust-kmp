@@ -7,6 +7,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -78,10 +80,8 @@ public class XrayTunnel(
     private var lastGeneration = 0L
 
     init {
-        scope.launch { engine.events.collect { inputs.send(Input.Engine(it)) } }
-        scope.launch {
-            for (input in inputs) handle(input)
-        }
+        engine.events.onEach { inputs.send(Input.Engine(it)) }.launchIn(scope)
+        scope.launch { for (input in inputs) handle(input) }
     }
 
     public fun start(profile: XrayProfile) {
@@ -174,7 +174,8 @@ public class XrayTunnel(
         target.withoutRouting = withoutRouting
         target.generation = ++lastGeneration
         state.value = TunnelState.Connecting(attempt, withoutRouting)
-        val config = target.profile.configJson.let { if (withoutRouting) configWithoutRouting(it) else it }
+        val json = target.profile.configJson
+        val config = if (withoutRouting) configWithoutRouting(json) else json
         try {
             engine.start(config, target.generation)
         } catch (error: RuntimeException) {
