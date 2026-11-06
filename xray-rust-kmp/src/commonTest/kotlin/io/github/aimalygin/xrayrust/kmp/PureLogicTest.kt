@@ -31,12 +31,11 @@ class TunnelPolicyTest {
     }
 
     @Test
-    fun networkChangeRestartsOnlyProtocolsWithoutRebind() {
+    fun networkChangeRestartsOnlyWithoutRebind() {
         val restarting = policy.copy(restartOnNetworkChange = true)
-        assertEquals(NetworkChangeDecision.LeaveToWrapper, restarting.onNetworkChange(XrayProtocol.Hysteria2))
-        assertEquals(NetworkChangeDecision.LeaveToWrapper, restarting.onNetworkChange(XrayProtocol.Wireguard))
-        assertEquals(NetworkChangeDecision.Restart, restarting.onNetworkChange(XrayProtocol.Vless))
-        assertEquals(NetworkChangeDecision.Ignore, policy.onNetworkChange(XrayProtocol.Vless))
+        assertEquals(NetworkChangeDecision.LeaveToWrapper, restarting.onNetworkChange(rebinds = true))
+        assertEquals(NetworkChangeDecision.Restart, restarting.onNetworkChange(rebinds = false))
+        assertEquals(NetworkChangeDecision.Ignore, policy.onNetworkChange(rebinds = false))
     }
 }
 
@@ -94,6 +93,11 @@ class XrayRuntimeTest {
         assertIs<XrayCompatibility.Incompatible>(XrayRuntime.checkCompatibility(XrayRuntimeInfo(XrayAbiVersion(1, 14), required)))
         assertIs<XrayCompatibility.Incompatible>(XrayRuntime.checkCompatibility(XrayRuntimeInfo(XrayAbiVersion(2, 0), required)))
         assertIs<XrayCompatibility.Incompatible>(XrayRuntime.checkCompatibility(XrayRuntimeInfo(XrayAbiVersion(1, 15), 0)))
+    }
+
+    @Test
+    fun bindingAbiComesFromMobileEnv() {
+        assertEquals(XrayAbiVersion(XrayBindingPin.FFI_ABI_MAJOR, XrayBindingPin.FFI_ABI_MINOR), XrayRuntime.bindingAbi)
     }
 
     @Test

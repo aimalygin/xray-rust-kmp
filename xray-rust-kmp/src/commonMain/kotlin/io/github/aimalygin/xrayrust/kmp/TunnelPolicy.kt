@@ -15,8 +15,8 @@ public data class TunnelPolicy(
     val backoffMultiplier: Double = 2.0,
     val maxBackoff: Duration = 30.seconds,
     /**
-     * Restart the core on a network change for protocols without rebind. Restarting drops every
-     * flow; protocols with [XrayProtocol.rebindsOnNetworkChange] are left to the platform wrapper.
+     * Restart the core on a network change when the platform wrapper cannot rebind the protocol
+     * (see [XrayTunnelEngine.rebindsOnNetworkChange]). Restarting drops every flow.
      */
     val restartOnNetworkChange: Boolean = false,
     /**
@@ -32,30 +32,30 @@ public data class TunnelPolicy(
     }
 
     /** Delay before start attempt [attempt] (2 is the first retry). */
-    public fun backoffBefore(attempt: Int): Duration {
+    internal fun backoffBefore(attempt: Int): Duration {
         require(attempt >= 2) { "attempt $attempt has no backoff" }
         return minOf(initialBackoff * backoffMultiplier.pow(attempt - 2), maxBackoff)
     }
 
-    public fun onFailure(attempt: Int, withoutRouting: Boolean): FailureDecision = when {
+    internal fun onFailure(attempt: Int, withoutRouting: Boolean): FailureDecision = when {
         attempt < maxStartAttempts -> FailureDecision.Retry(attempt + 1, backoffBefore(attempt + 1))
         fallbackWithoutRouting && !withoutRouting -> FailureDecision.FallbackWithoutRouting
         else -> FailureDecision.GiveUp
     }
 
-    public fun onNetworkChange(protocol: XrayProtocol): NetworkChangeDecision = when {
-        protocol.rebindsOnNetworkChange -> NetworkChangeDecision.LeaveToWrapper
+    internal fun onNetworkChange(rebinds: Boolean): NetworkChangeDecision = when {
+        rebinds -> NetworkChangeDecision.LeaveToWrapper
         restartOnNetworkChange -> NetworkChangeDecision.Restart
         else -> NetworkChangeDecision.Ignore
     }
 }
 
-public sealed interface FailureDecision {
-    public data class Retry(val attempt: Int, val delay: Duration) : FailureDecision
+internal sealed interface FailureDecision {
+    data class Retry(val attempt: Int, val delay: Duration) : FailureDecision
 
-    public data object FallbackWithoutRouting : FailureDecision
+    data object FallbackWithoutRouting : FailureDecision
 
-    public data object GiveUp : FailureDecision
+    data object GiveUp : FailureDecision
 }
 
-public enum class NetworkChangeDecision { LeaveToWrapper, Restart, Ignore }
+internal enum class NetworkChangeDecision { LeaveToWrapper, Restart, Ignore }

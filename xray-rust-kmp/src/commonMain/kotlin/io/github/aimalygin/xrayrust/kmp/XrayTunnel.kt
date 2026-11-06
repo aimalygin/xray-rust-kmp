@@ -28,13 +28,19 @@ public data class TunnelFailure(val kind: Kind, val message: String) {
     public enum class Kind { StartFailed, Fatal }
 }
 
+/**
+ * Engine report about the session started by `XrayTunnelEngine.start(configJson, generation)`.
+ * [generation] lets the controller drop late events of a session it has already replaced.
+ */
 public sealed interface XrayEngineEvent {
-    public data object Started : XrayEngineEvent
+    public val generation: Long
 
-    public data class Failed(val failure: TunnelFailure) : XrayEngineEvent
+    public data class Started(override val generation: Long) : XrayEngineEvent
+
+    public data class Failed(override val generation: Long, val failure: TunnelFailure) : XrayEngineEvent
 
     /** The platform tunnel is down: stopped on request, revoked by the system or destroyed. */
-    public data object Stopped : XrayEngineEvent
+    public data class Stopped(override val generation: Long) : XrayEngineEvent
 }
 
 /**
@@ -44,9 +50,14 @@ public sealed interface XrayEngineEvent {
 public interface XrayTunnelEngine {
     public val events: Flow<XrayEngineEvent>
 
-    public fun start(configJson: String)
+    /** Starts [configJson]; every event about this session carries [generation]. */
+    public fun start(configJson: String, generation: Long)
 
+    /** Stops the current session and reports one [XrayEngineEvent.Stopped], also when nothing runs. */
     public fun stop()
+
+    /** Whether this platform's wrapper rebinds [protocol] on a network change without a core restart. */
+    public fun rebindsOnNetworkChange(protocol: XrayProtocol): Boolean
 }
 
 /**
@@ -64,6 +75,7 @@ public class XrayTunnel(
     private val inputs = Channel<Input>(Channel.UNLIMITED)
     private var session: Session? = null
     private var retryJob: Job? = null
+    private var lastGeneration = 0L
 
     init {
         scope.launch { engine.events.collect { inputs.send(Input.Engine(it)) } }
@@ -104,14 +116,15 @@ public class XrayTunnel(
     }
 
     private fun onEngineEvent(event: XrayEngineEvent) {
-        val current = session
+        val current = session?.takeIf { it.generation == event.generation }
         when (event) {
-            XrayEngineEvent.Started -> if (current != null) {
+            is XrayEngineEvent.Started -> if (current != null) {
                 current.attempt = 1
                 state.value = TunnelState.Connected(current.profile.protocol, current.withoutRouting)
             }
             is XrayEngineEvent.Failed -> if (current != null) onFailure(current, event.failure)
-            XrayEngineEvent.Stopped -> if (state.value is TunnelState.Stopping || current != null) {
+            // A Stopped of a replaced session must not end the newer one.
+            is XrayEngineEvent.Stopped -> if (current != null || (session == null && state.value is TunnelState.Stopping)) {
                 retryJob?.cancel()
                 session = null
                 state.value = TunnelState.Idle
@@ -141,7 +154,7 @@ public class XrayTunnel(
     private fun restartIfPolicyAllows() {
         val current = session ?: return
         if (state.value !is TunnelState.Connected) return
-        when (policy.onNetworkChange(current.profile.protocol)) {
+        when (policy.onNetworkChange(rebinds = engine.rebindsOnNetworkChange(current.profile.protocol))) {
             NetworkChangeDecision.Restart -> launchAttempt(current, attempt = 1, withoutRouting = current.withoutRouting)
             NetworkChangeDecision.LeaveToWrapper, NetworkChangeDecision.Ignore -> Unit
         }
@@ -159,10 +172,11 @@ public class XrayTunnel(
         session = target
         target.attempt = attempt
         target.withoutRouting = withoutRouting
+        target.generation = ++lastGeneration
         state.value = TunnelState.Connecting(attempt, withoutRouting)
         val config = target.profile.configJson.let { if (withoutRouting) configWithoutRouting(it) else it }
         try {
-            engine.start(config)
+            engine.start(config, target.generation)
         } catch (error: RuntimeException) {
             onFailure(target, TunnelFailure(TunnelFailure.Kind.StartFailed, error.safeDescription()))
         }
@@ -171,6 +185,7 @@ public class XrayTunnel(
     private class Session(val profile: XrayProfile) {
         var attempt = 1
         var withoutRouting = false
+        var generation = 0L
     }
 
     private sealed interface Input {

@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import platform.Foundation.NSError
 import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSOperationQueue
@@ -79,9 +79,11 @@ public class XrayIosTunnelEngine(
     private var statusObserver: NSObjectProtocol? = null
     private var phase = Phase.Idle
     private var startJob: Job? = null
+    private var generation = 0L
 
-    override fun start(configJson: String) {
+    override fun start(configJson: String, generation: Long) {
         startJob?.cancel()
+        this.generation = generation
         phase = Phase.Preparing
         startJob = scope.launch {
             try {
@@ -90,10 +92,13 @@ public class XrayIosTunnelEngine(
                 throw error
             } catch (error: Exception) {
                 phase = Phase.Idle
-                engineEvents.tryEmit(XrayEngineEvent.Failed(TunnelFailure(TunnelFailure.Kind.StartFailed, error.failureText())))
+                emit(XrayEngineEvent.Failed(generation, TunnelFailure(TunnelFailure.Kind.StartFailed, error.failureText())))
             }
         }
     }
+
+    /** The wrapper's network observer rebinds these without restarting the core. */
+    override fun rebindsOnNetworkChange(protocol: XrayProtocol): Boolean = protocol in reboundProtocols
 
     override fun stop() {
         startJob?.cancel()
@@ -105,7 +110,7 @@ public class XrayIosTunnelEngine(
             }
             Phase.Idle, Phase.Preparing -> {
                 phase = Phase.Idle
-                engineEvents.tryEmit(XrayEngineEvent.Stopped)
+                emit(XrayEngineEvent.Stopped(generation))
             }
             Phase.Stopping -> Unit
         }
@@ -135,7 +140,8 @@ public class XrayIosTunnelEngine(
     private suspend fun stopActiveSession(connection: NEVPNConnection) {
         if (connection.status.toXrayVpnStatus() in inactiveStatuses) return
         connection.stopVPNTunnel()
-        withTimeout(STOP_TIMEOUT) { status.first { it in inactiveStatuses } }
+        // withTimeout would end start() as a silent cancellation; this becomes a reported failure.
+        withTimeoutOrNull(STOP_TIMEOUT) { status.first { it in inactiveStatuses } } ?: throw PreviousSessionStopTimeoutException()
     }
 
     private fun observeStatus() {
@@ -154,7 +160,7 @@ public class XrayIosTunnelEngine(
         when (current) {
             XrayVpnStatus.Connected -> if (phase == Phase.Launched) {
                 phase = Phase.Running
-                engineEvents.tryEmit(XrayEngineEvent.Started)
+                emit(XrayEngineEvent.Started(generation))
             }
             XrayVpnStatus.Disconnected, XrayVpnStatus.Invalid -> onDisconnected(connection)
             XrayVpnStatus.Connecting, XrayVpnStatus.Reasserting, XrayVpnStatus.Disconnecting -> Unit
@@ -165,16 +171,21 @@ public class XrayIosTunnelEngine(
         val previous = phase
         when (previous) {
             Phase.Idle, Phase.Preparing -> return
-            Phase.Stopping -> engineEvents.tryEmit(XrayEngineEvent.Stopped)
+            Phase.Stopping -> emit(XrayEngineEvent.Stopped(generation))
             Phase.Launched, Phase.Running -> {
                 val kind = if (previous == Phase.Running) TunnelFailure.Kind.Fatal else TunnelFailure.Kind.StartFailed
+                val session = generation
                 connection.lastDisconnectError { error ->
-                    val event = error?.let { XrayEngineEvent.Failed(TunnelFailure(kind, it.failureText())) }
-                    engineEvents.tryEmit(event ?: XrayEngineEvent.Stopped)
+                    val event = error?.let { XrayEngineEvent.Failed(session, TunnelFailure(kind, it.failureText())) }
+                    emit(event ?: XrayEngineEvent.Stopped(session))
                 }
             }
         }
         phase = Phase.Idle
+    }
+
+    private fun emit(event: XrayEngineEvent) {
+        engineEvents.tryEmit(event)
     }
 
     private enum class Phase { Idle, Preparing, Launched, Running, Stopping }
@@ -186,6 +197,7 @@ public class XrayIosTunnelEngine(
         const val EVENT_BUFFER = 16
         val STOP_TIMEOUT = 10.seconds
         val inactiveStatuses = setOf(XrayVpnStatus.Disconnected, XrayVpnStatus.Invalid)
+        val reboundProtocols = setOf(XrayProtocol.Hysteria2, XrayProtocol.Wireguard)
     }
 }
 
@@ -206,6 +218,8 @@ private fun NEVPNStatus.toXrayVpnStatus(): XrayVpnStatus = when (this) {
     NEVPNStatusDisconnecting -> XrayVpnStatus.Disconnecting
     else -> XrayVpnStatus.Invalid
 }
+
+private class PreviousSessionStopTimeoutException : IllegalStateException()
 
 private class NetworkExtensionException(val error: NSError) : Exception("${error.domain}#${error.code}")
 

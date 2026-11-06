@@ -8,8 +8,6 @@ package io.github.aimalygin.xrayrust.kmp
 public enum class XrayProtocol(
     internal val coreFormat: String?,
     internal val importCapability: XrayCapability?,
-    /** The platform wrapper rebinds this protocol on a network change without restarting the core. */
-    public val rebindsOnNetworkChange: Boolean = false,
 ) {
     // VLESS goes through the core once xray_profile_import_json accepts "format":"vless":
     // set coreFormat = "vless" and its capability here; nothing else changes.
@@ -17,8 +15,8 @@ public enum class XrayProtocol(
     Vmess("vmess", XrayCapability.VmessOutbound),
     Trojan("trojan", XrayCapability.TrojanOutbound),
     Shadowsocks2022("shadowsocks2022", XrayCapability.Shadowsocks2022Outbound),
-    Hysteria2("hysteria2", XrayCapability.Hysteria2Outbound, rebindsOnNetworkChange = true),
-    Wireguard("wireguard", XrayCapability.WireguardOutbound, rebindsOnNetworkChange = true),
+    Hysteria2("hysteria2", XrayCapability.Hysteria2Outbound),
+    Wireguard("wireguard", XrayCapability.WireguardOutbound),
     Socks("socks", XrayCapability.SocksProfileImport),
     Http("http", XrayCapability.HttpProfileImport),
     ;
@@ -58,15 +56,15 @@ public class XrayProfile(
 }
 
 /** Where a protocol's text is turned into a profile. */
-public sealed interface XrayImportRoute {
+internal sealed interface XrayImportRoute {
     /** `xray_profile_import_json` with this `"format"`. */
-    public data class Core(val format: String) : XrayImportRoute
+    data class Core(val format: String) : XrayImportRoute
 
     /** A platform importer: `XrayVlessUrlImporter` on Android, the Swift importer handed in on iOS. */
-    public data object PlatformVless : XrayImportRoute
+    data object PlatformVless : XrayImportRoute
 }
 
-public val XrayProtocol.importRoute: XrayImportRoute
+internal val XrayProtocol.importRoute: XrayImportRoute
     get() = coreFormat?.let(XrayImportRoute::Core) ?: XrayImportRoute.PlatformVless
 
 /** Platform importer for links the core cannot import yet (VLESS today). */

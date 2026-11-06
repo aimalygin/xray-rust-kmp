@@ -13,26 +13,37 @@ import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class XrayTunnelTest {
-    private class FakeEngine : XrayTunnelEngine {
+    private class FakeEngine(private val rebound: Set<XrayProtocol> = emptySet()) : XrayTunnelEngine {
         private val eventFlow = MutableSharedFlow<XrayEngineEvent>(extraBufferCapacity = 8)
         override val events: Flow<XrayEngineEvent> = eventFlow
         val started: List<String>
             field = mutableListOf()
+        var generation = 0L
+            private set
         var stops = 0
             private set
 
         fun emit(event: XrayEngineEvent) = eventFlow.tryEmit(event)
 
-        override fun start(configJson: String) {
+        override fun start(configJson: String, generation: Long) {
             started += configJson
+            this.generation = generation
         }
 
         override fun stop() {
             stops++
         }
+
+        override fun rebindsOnNetworkChange(protocol: XrayProtocol): Boolean = protocol in rebound
     }
 
-    private val failure = XrayEngineEvent.Failed(TunnelFailure(TunnelFailure.Kind.StartFailed, "boom"))
+    private val boom = TunnelFailure(TunnelFailure.Kind.StartFailed, "boom")
+
+    private fun FakeEngine.started() = XrayEngineEvent.Started(generation)
+
+    private fun FakeEngine.stopped() = XrayEngineEvent.Stopped(generation)
+
+    private fun FakeEngine.failed() = XrayEngineEvent.Failed(generation, boom)
 
     private fun TestScope.tunnel(engine: FakeEngine, policy: TunnelPolicy = TunnelPolicy()): XrayTunnel =
         XrayTunnel(engine, backgroundScope, policy).also { runCurrent() }
@@ -49,12 +60,12 @@ class XrayTunnelTest {
         tunnel.start(profile(XrayProtocol.Trojan))
         runCurrent()
         assertEquals(TunnelState.Connecting(attempt = 1), tunnel.state.value)
-        send(engine, XrayEngineEvent.Started)
+        send(engine, engine.started())
         assertEquals(TunnelState.Connected(XrayProtocol.Trojan), tunnel.state.value)
         tunnel.stop()
         runCurrent()
         assertEquals(TunnelState.Stopping, tunnel.state.value)
-        send(engine, XrayEngineEvent.Stopped)
+        send(engine, engine.stopped())
         assertEquals(TunnelState.Idle, tunnel.state.value)
         assertEquals(1, engine.stops)
     }
@@ -65,14 +76,14 @@ class XrayTunnelTest {
         val tunnel = tunnel(engine, TunnelPolicy(maxStartAttempts = 2))
         tunnel.start(profile(XrayProtocol.Vmess))
         runCurrent()
-        send(engine, failure)
+        send(engine, engine.failed())
         assertEquals(TunnelState.Connecting(attempt = 2), tunnel.state.value)
         assertEquals(1, engine.started.size)
         advanceTimeBy(1.seconds)
         runCurrent()
         assertEquals(2, engine.started.size)
-        send(engine, failure)
-        assertEquals(TunnelState.Failed(failure.failure), tunnel.state.value)
+        send(engine, engine.failed())
+        assertEquals(TunnelState.Failed(boom), tunnel.state.value)
         assertEquals(1, engine.stops)
     }
 
@@ -82,29 +93,71 @@ class XrayTunnelTest {
         val tunnel = tunnel(engine, TunnelPolicy(maxStartAttempts = 1, fallbackWithoutRouting = true))
         tunnel.start(profile(XrayProtocol.Vless))
         runCurrent()
-        send(engine, failure)
+        send(engine, engine.failed())
         assertEquals(TunnelState.Connecting(attempt = 1, withoutRouting = true), tunnel.state.value)
         assertEquals("{}", engine.started.last())
-        send(engine, XrayEngineEvent.Started)
+        send(engine, engine.started())
         assertEquals(TunnelState.Connected(XrayProtocol.Vless, withoutRouting = true), tunnel.state.value)
     }
 
     @Test
     fun networkChangeRestartsOnlyWhenPolicyAllows() = runTest(timeout = 10.seconds) {
-        val engine = FakeEngine()
+        val engine = FakeEngine(rebound = setOf(XrayProtocol.Hysteria2))
         val tunnel = tunnel(engine, TunnelPolicy(restartOnNetworkChange = true))
         tunnel.start(profile(XrayProtocol.Hysteria2))
         runCurrent()
-        send(engine, XrayEngineEvent.Started)
+        send(engine, engine.started())
         tunnel.onNetworkChanged()
         runCurrent()
         assertEquals(1, engine.started.size)
         tunnel.start(profile(XrayProtocol.Trojan))
         runCurrent()
-        send(engine, XrayEngineEvent.Started)
+        send(engine, engine.started())
         tunnel.onNetworkChanged()
         runCurrent()
         assertEquals(3, engine.started.size)
+    }
+
+    @Test
+    fun networkChangeRestartsUnreboundHysteria2WhenOptedIn() = runTest(timeout = 10.seconds) {
+        val engine = FakeEngine()
+        val tunnel = tunnel(engine, TunnelPolicy(restartOnNetworkChange = true))
+        tunnel.start(profile(XrayProtocol.Hysteria2))
+        runCurrent()
+        send(engine, engine.started())
+        tunnel.onNetworkChanged()
+        runCurrent()
+        assertEquals(2, engine.started.size)
+    }
+
+    @Test
+    fun stoppedOfReplacedSessionDoesNotEndNewOne() = runTest(timeout = 10.seconds) {
+        val engine = FakeEngine()
+        val tunnel = tunnel(engine)
+        tunnel.start(profile(XrayProtocol.Trojan))
+        runCurrent()
+        send(engine, engine.started())
+        val old = engine.stopped()
+        tunnel.stop()
+        tunnel.start(profile(XrayProtocol.Trojan))
+        runCurrent()
+        send(engine, old)
+        assertEquals(TunnelState.Connecting(attempt = 1), tunnel.state.value)
+        send(engine, engine.started())
+        assertEquals(TunnelState.Connected(XrayProtocol.Trojan), tunnel.state.value)
+    }
+
+    @Test
+    fun lateFailureOfEarlierAttemptIsIgnored() = runTest(timeout = 10.seconds) {
+        val engine = FakeEngine()
+        val tunnel = tunnel(engine)
+        tunnel.start(profile(XrayProtocol.Vmess))
+        runCurrent()
+        val stale = engine.failed()
+        tunnel.start(profile(XrayProtocol.Vmess))
+        runCurrent()
+        send(engine, stale)
+        assertEquals(TunnelState.Connecting(attempt = 1), tunnel.state.value)
     }
 
     @Test
@@ -113,8 +166,8 @@ class XrayTunnelTest {
         val tunnel = tunnel(engine)
         tunnel.start(profile(XrayProtocol.Socks))
         runCurrent()
-        send(engine, XrayEngineEvent.Started)
-        send(engine, XrayEngineEvent.Stopped)
+        send(engine, engine.started())
+        send(engine, engine.stopped())
         assertEquals(TunnelState.Idle, tunnel.state.value)
     }
 }

@@ -32,8 +32,8 @@ version in `release/mobile.env`, pinned strictly; `./gradlew :xray-rust-kmp:veri
   native library. `XrayRuntime.checkCompatibility()` / `requireCompatible()` fail with a reason when
   the runtime is older than the ABI the binding is built against (1.15, xray-rust-mobile 0.9.0) or
   lacks a required capability.
-- `XrayProfiles().import(text): Result<XrayProfile>` detects the protocol and routes it explicitly
-  (`XrayProtocol.importRoute`): every format `xray_profile_import_json` supports (http, socks,
+- `XrayProfiles().import(text): Result<XrayProfile>` detects the protocol and routes it explicitly:
+  every format `xray_profile_import_json` supports (http, socks,
   trojan, shadowsocks2022, vmess, hysteria2, wireguard) goes through the core; VLESS goes through a
   platform importer (see below). Errors are `XrayImportException` with a reason and no input text.
 - `XrayTunnel(engine, scope, policy)`: `state: StateFlow<TunnelState>` (`Idle`, `Connecting`,
@@ -42,9 +42,14 @@ version in `release/mobile.env`, pinned strictly; `./gradlew :xray-rust-kmp:veri
   3 start attempts with 1 s → 30 s backoff, no restart on network change, no fallback.
   `fallbackWithoutRouting` (drop the `routing` section after all attempts fail) changes where
   traffic goes, so it is only an explicit opt-in.
-- Network changes: Hysteria2 and WireGuard are rebound by the platform wrapper without restarting
-  the core; the controller never restarts them. Restarting drops every flow, so other protocols
-  restart only with `restartOnNetworkChange = true`.
+- Network changes: the engine says which protocols its platform wrapper rebinds without restarting
+  the core (`XrayTunnelEngine.rebindsOnNetworkChange`); the controller never restarts those.
+  Restarting drops every flow, so any other protocol restarts only with
+  `restartOnNetworkChange = true`. Today that is Hysteria2 and WireGuard on iOS and nothing on
+  Android (see the known gap below).
+- Engine events carry the generation of the start they belong to, so a late `Stopped` or `Failed`
+  of a replaced session cannot end the new one. Failure messages hold the error type (Android) or
+  the `NSError` domain and code (iOS), never core or config text.
 
 ### Android
 
@@ -54,9 +59,16 @@ version in `release/mobile.env`, pinned strictly; `./gradlew :xray-rust-kmp:veri
 VPN consent with `VpnService.prepare` before `start` (see the sample). The config reaches the
 service in process memory, never in Intent extras.
 
+`XrayVpnService` 0.9.0 ignores a start while an earlier start is still running, and a stop during
+startup cancels it without a callback. `XrayKmpVpnService` therefore never cancels a start in
+flight: a newer start or a stop waits until it reports (started or failed) and then replaces or
+stops it; only destroying the service cancels it at once. A "replace session" call or a cancel
+callback in xray-rust-mobile would remove that wait.
+
 Known gap: in xray-rust-mobile 0.9.0 `XrayVpnService` does not run `XrayNetworkChangeCoordinator`
 and does not expose its `XrayCore`, so a service built on it gets no Hysteria2/WireGuard rebind
-yet. Closing it needs a hook in xray-rust-mobile (for example, a callback with the started core),
+yet; `AndroidTunnelEngine` reports no rebind, and `restartOnNetworkChange = true` restarts these
+protocols too. Closing it needs a hook in xray-rust-mobile (for example, a callback with the started core),
 not a second coordinator here.
 
 ### VLESS

@@ -60,11 +60,11 @@ public sealed interface XrayCompatibility {
 public class XrayIncompatibleRuntimeException(message: String) : IllegalStateException(message)
 
 public object XrayRuntime {
-    /** ABI of the pinned xray-rust-mobile release (release/mobile.env) this binding is built against. */
-    public val bindingAbi: XrayAbiVersion = XrayAbiVersion(major = 1, minor = 15)
+    /** ABI of the pinned xray-rust-mobile release, generated from release/mobile.env. */
+    public val bindingAbi: XrayAbiVersion = XrayAbiVersion(XrayBindingPin.FFI_ABI_MAJOR, XrayBindingPin.FFI_ABI_MINOR)
 
     /** Capabilities every platform implementation of this binding relies on. */
-    public val requiredCapabilities: Set<XrayCapability> = setOf(
+    internal val requiredCapabilities: Set<XrayCapability> = setOf(
         XrayCapability.ProfileImport,
         XrayCapability.TunFileDescriptor,
     )
