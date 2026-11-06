@@ -17,3 +17,8 @@ and does not expose its `XrayCore`, so a service built on it gets no Hysteria2/W
 yet; `AndroidTunnelEngine` reports no rebind, and `restartOnNetworkChange = true` restarts these
 protocols too. Closing it needs a hook in xray-rust-mobile (for example, a callback with the started core),
 not a second coordinator here.
+
+[xray-rust#214](https://github.com/aimalygin/xray-rust/pull/214) adds both to `XrayVpnService`: an opt-in
+network-change rebind and start replacement with an `onXrayTunnelStartCancelled` callback. Once a
+xray-rust-mobile release ships it, `AndroidTunnelEngine` reports rebind and `XrayKmpVpnService` drops
+the wait.

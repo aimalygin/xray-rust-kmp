@@ -27,7 +27,8 @@ The API is a proposal for discussion on the step-1 pull request.
 
 ## VLESS
 
-`xray_profile_import_json` has no `"format":"vless"` today. Until it does, VLESS links go through
+`xray_profile_import_json` has no `"format":"vless"` today
+([xray-rust#213](https://github.com/aimalygin/xray-rust/pull/213) adds it). Until it does, VLESS links go through
 the platform importers: `XrayVlessUrlImporter` from the AAR on Android, and on iOS the Swift
 `XrayVlessURLImporter`, handed to `XrayProfiles(vlessImporter = …)` as an `XrayLinkImporter`.
 Once the core accepts VLESS, `XrayProtocol.Vless` gets its core format and capability and every

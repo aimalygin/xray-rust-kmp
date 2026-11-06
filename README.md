@@ -70,11 +70,13 @@ xray-rust-mobile, which is already tested on devices every release. Kotlin runs 
 | Run on a real device | not tested yet | not tested yet |
 
 - **VLESS** goes through the platform importers for now, because the core's
-  `xray_profile_import_json` has no VLESS format yet. A core pull request adds it. Once that ships,
+  `xray_profile_import_json` has no VLESS format yet.
+  [xray-rust#213](https://github.com/aimalygin/xray-rust/pull/213) adds it. Once that ships,
   VLESS moves to the shared core path with no API change.
 - **Network changes on Android:** `XrayVpnService` in xray-rust-mobile 0.9.0 does not run the
   network change coordinator and does not expose its core, so Hysteria2 and WireGuard cannot rebind
-  yet. Closing this needs a small hook in xray-rust-mobile. Details are in [docs/android.md](docs/android.md).
+  yet. [xray-rust#214](https://github.com/aimalygin/xray-rust/pull/214) makes `XrayVpnService` rebind on
+  its own (opt-in). Details are in [docs/android.md](docs/android.md).
 
 ## Your app decides the policy
 
