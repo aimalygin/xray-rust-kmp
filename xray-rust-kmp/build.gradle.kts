@@ -138,21 +138,35 @@ val extractXrayXcframework = tasks.register<Sync>("extractXrayXcframework") {
     into(xcframeworkRoot)
 }
 
-// Kotlin/Native target -> slice directory of XrayRust.xcframework.
+// The simulator slice of the release is fat (x86_64 + arm64). iosSimulatorArm64 needs only arm64,
+// so the archive embedded in its klib is thinned: about half the size.
+val thinSimulatorDir = xrayMobileDir.map { it.dir("ios-simulator-arm64") }
+val thinXraySimulatorSlice = tasks.register<Exec>("thinXraySimulatorSlice") {
+    description = "Extracts the arm64 part of the simulator libxray_ffi.a for iosSimulatorArm64."
+    dependsOn(extractXrayXcframework)
+    val fat = xcframeworkDir.map { it.file("ios-arm64_x86_64-simulator/libxray_ffi.a") }
+    val thin = thinSimulatorDir.map { it.file("libxray_ffi.a") }
+    inputs.file(fat)
+    outputs.file(thin)
+    doFirst { thin.get().asFile.parentFile.mkdirs() }
+    commandLine("lipo", fat.get().asFile.path, "-thin", "arm64", "-output", thin.get().asFile.path)
+}
+
+// Kotlin/Native target -> directory with the libxray_ffi.a to embed, and the task that produces it.
 val xcframeworkSlices = mapOf(
-    "iosArm64" to "ios-arm64",
-    "iosSimulatorArm64" to "ios-arm64_x86_64-simulator",
+    "iosArm64" to (xcframeworkDir.map { it.dir("ios-arm64") } to extractXrayXcframework),
+    "iosSimulatorArm64" to (thinSimulatorDir to thinXraySimulatorSlice),
 )
 
 fun KotlinNativeTarget.bindXrayFfi() {
-    val slice = xcframeworkDir.get().dir(xcframeworkSlices.getValue(targetName)).asFile
+    val (sliceDir, sliceTask) = xcframeworkSlices.getValue(targetName)
     val interop = compilations.getByName("main").cinterops.create("xrayffi") {
         definitionFile = project.file("src/nativeInterop/cinterop/xrayffi.def")
         includeDirs(ffiIncludeDir.get().asFile)
-        extraOpts("-libraryPath", slice.path)
+        extraOpts("-libraryPath", sliceDir.get().asFile.path)
     }
     tasks.named(interop.interopProcessingTaskName) {
-        dependsOn(downloadXrayFfiHeader, downloadXrayModulemap, extractXrayXcframework)
+        dependsOn(downloadXrayFfiHeader, downloadXrayModulemap, sliceTask)
     }
     binaries.framework {
         baseName = "XrayRustKmp"

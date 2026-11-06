@@ -42,7 +42,8 @@ release, at no configuration-time network access:
   unless it matches `XRAY_RUST_MOBILE_XCFRAMEWORK_ZIP_SHA256` (the `binaryTarget` checksum in the
   tag's `Package.swift`); `extractXrayXcframework` unpacks it.
 - cinterop (`src/nativeInterop/cinterop/xrayffi.def`) binds the header and embeds the slice of the
-  target: `ios-arm64` for `iosArm64`, `ios-arm64_x86_64-simulator` for `iosSimulatorArm64`.
+  target: `ios-arm64` for `iosArm64`; for `iosSimulatorArm64` the arm64 part of the fat
+  `ios-arm64_x86_64-simulator` slice (`thinXraySimulatorSlice`, `lipo -thin`), so each klib is ~41 MB.
   The archive needs only libSystem, so there are no extra linker flags.
 - Everything lands in `xray-rust-kmp/build/xray-rust-mobile/<version>/`; tasks are up to date
   while the hashes and files are unchanged.
