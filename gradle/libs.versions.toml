@@ -1,0 +1,22 @@
+[versions]
+agp = "9.5.1"
+kotlin = "2.4.21"
+kotlinxCoroutines = "1.11.0"
+kotlinxSerialization = "1.12.0"
+android-compileSdk = "36"
+android-minSdk = "24"
+android-sample-minSdk = "26"
+android-targetSdk = "36"
+
+[libraries]
+# Version comes from release/mobile.env (strictly pinned in xray-rust-kmp/build.gradle.kts).
+xray-rust-mobile = { module = "io.github.aimalygin:xray-rust-mobile" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-kotlin-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

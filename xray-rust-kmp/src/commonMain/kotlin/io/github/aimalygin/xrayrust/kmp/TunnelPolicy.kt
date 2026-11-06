@@ -1,0 +1,61 @@
+package io.github.aimalygin.xrayrust.kmp
+
+import kotlin.math.pow
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+
+/**
+ * App policy for retries, restart and fallback. The library only applies it; the defaults are
+ * conservative: a few spaced start attempts, no restart on network change, no fallback.
+ */
+public data class TunnelPolicy(
+    /** Start attempts per [XrayTunnel.start] or per failure of a running tunnel, including the first. */
+    val maxStartAttempts: Int = 3,
+    val initialBackoff: Duration = 1.seconds,
+    val backoffMultiplier: Double = 2.0,
+    val maxBackoff: Duration = 30.seconds,
+    /**
+     * Restart the core on a network change for protocols without rebind. Restarting drops every
+     * flow; protocols with [XrayProtocol.rebindsOnNetworkChange] are left to the platform wrapper.
+     */
+    val restartOnNetworkChange: Boolean = false,
+    /**
+     * After all attempts fail, try once more with the `routing` section removed. This changes where
+     * traffic goes (everything through the first outbound), so it is an explicit opt-in.
+     */
+    val fallbackWithoutRouting: Boolean = false,
+) {
+    init {
+        require(maxStartAttempts >= 1) { "maxStartAttempts must be at least 1" }
+        require(backoffMultiplier >= 1.0) { "backoffMultiplier must be at least 1" }
+        require(initialBackoff.isPositive() && maxBackoff >= initialBackoff) { "backoff bounds are invalid" }
+    }
+
+    /** Delay before start attempt [attempt] (2 is the first retry). */
+    public fun backoffBefore(attempt: Int): Duration {
+        require(attempt >= 2) { "attempt $attempt has no backoff" }
+        return minOf(initialBackoff * backoffMultiplier.pow(attempt - 2), maxBackoff)
+    }
+
+    public fun onFailure(attempt: Int, withoutRouting: Boolean): FailureDecision = when {
+        attempt < maxStartAttempts -> FailureDecision.Retry(attempt + 1, backoffBefore(attempt + 1))
+        fallbackWithoutRouting && !withoutRouting -> FailureDecision.FallbackWithoutRouting
+        else -> FailureDecision.GiveUp
+    }
+
+    public fun onNetworkChange(protocol: XrayProtocol): NetworkChangeDecision = when {
+        protocol.rebindsOnNetworkChange -> NetworkChangeDecision.LeaveToWrapper
+        restartOnNetworkChange -> NetworkChangeDecision.Restart
+        else -> NetworkChangeDecision.Ignore
+    }
+}
+
+public sealed interface FailureDecision {
+    public data class Retry(val attempt: Int, val delay: Duration) : FailureDecision
+
+    public data object FallbackWithoutRouting : FailureDecision
+
+    public data object GiveUp : FailureDecision
+}
+
+public enum class NetworkChangeDecision { LeaveToWrapper, Restart, Ignore }
