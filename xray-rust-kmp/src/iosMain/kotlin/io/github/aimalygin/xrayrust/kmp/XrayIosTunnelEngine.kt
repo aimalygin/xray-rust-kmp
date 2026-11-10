@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -56,6 +57,10 @@ public enum class XrayVpnStatus { Invalid, Disconnected, Connecting, Connected, 
  * `XrayPacketTunnelProvider`. The config goes to the keychain under a reference; the extension
  * gets only the reference (provider configuration and start option), never the JSON itself.
  * No Kotlin/Native code runs in the extension.
+ *
+ * A tunnel this engine did not start (already up when the app launched, or switched on in the
+ * system settings) is reported as `Started(XrayEngineEvent.EXTERNAL_SESSION)`, so the controller
+ * shows it and can stop it. Main thread only: [scope] must dispatch on the main queue.
  */
 public class XrayIosTunnelEngine(
     private val providerBundleIdentifier: String,
@@ -67,7 +72,9 @@ public class XrayIosTunnelEngine(
         this(providerBundleIdentifier, configStore, localizedDescription, MainScope())
 
     private val engineEvents = MutableSharedFlow<XrayEngineEvent>(extraBufferCapacity = EVENT_BUFFER)
-    override val events: Flow<XrayEngineEvent> = engineEvents
+
+    // The first subscriber is the controller: only then can a tunnel that is already up be reported.
+    override val events: Flow<XrayEngineEvent> = engineEvents.onSubscription { attachOnce() }
 
     /** `NEVPNStatus` of the managed connection, updated from `NEVPNStatusDidChangeNotification`. */
     public val status: StateFlow<XrayVpnStatus>
@@ -77,7 +84,8 @@ public class XrayIosTunnelEngine(
     private var statusObserver: NSObjectProtocol? = null
     private var phase = Phase.Idle
     private var startJob: Job? = null
-    private var generation = 0L
+    private var generation = NO_GENERATION
+    private var attachRequested = false
 
     override fun start(configJson: String, generation: Long) {
         startJob?.cancel()
@@ -114,6 +122,26 @@ public class XrayIosTunnelEngine(
         }
     }
 
+    private fun attachOnce() {
+        if (attachRequested) return
+        attachRequested = true
+        scope.launch { attachToSavedManager() }
+    }
+
+    // Best effort: without readable preferences there is nothing to adopt.
+    private suspend fun attachToSavedManager() {
+        val saved = try {
+            loadManagers().firstOrNull { it.providerBundleId == providerBundleIdentifier }
+        } catch (_: NetworkExtensionException) {
+            null
+        }
+        // A start issued meanwhile owns the manager.
+        if (saved == null || manager != null) return
+        manager = saved
+        observeStatus()
+        onStatusChanged(saved.connection)
+    }
+
     private suspend fun launchTunnel(configJson: String) {
         val target = loadManagers().firstOrNull { it.providerBundleId == providerBundleIdentifier }
             ?: NETunnelProviderManager()
@@ -143,13 +171,16 @@ public class XrayIosTunnelEngine(
             ?: throw PreviousSessionStopTimeoutException()
     }
 
+    // Every call re-reads the status: each start loads a fresh manager, and the last
+    // notification may be about the previous one.
     private fun observeStatus() {
-        if (statusObserver != null) return
-        statusObserver = NSNotificationCenter.defaultCenter.addObserverForName(
-            name = NEVPNStatusDidChangeNotification,
-            `object` = null,
-            queue = NSOperationQueue.mainQueue,
-        ) { _ -> manager?.connection?.let(::onStatusChanged) }
+        if (statusObserver == null) {
+            statusObserver = NSNotificationCenter.defaultCenter.addObserverForName(
+                name = NEVPNStatusDidChangeNotification,
+                `object` = null,
+                queue = NSOperationQueue.mainQueue,
+            ) { _ -> manager?.connection?.let(::onStatusChanged) }
+        }
         manager?.connection?.let { status.value = it.status.toXrayVpnStatus() }
     }
 
@@ -157,13 +188,21 @@ public class XrayIosTunnelEngine(
         val current = connection.status.toXrayVpnStatus()
         status.value = current
         when (current) {
-            XrayVpnStatus.Connected -> if (phase == Phase.Launched) {
-                phase = Phase.Running
-                emit(XrayEngineEvent.Started(generation))
+            XrayVpnStatus.Connected -> when (phase) {
+                Phase.Launched -> reportRunning(generation)
+                // Up without a start from this engine: before the app launched or from the system settings.
+                Phase.Idle -> reportRunning(XrayEngineEvent.EXTERNAL_SESSION)
+                Phase.Preparing, Phase.Running, Phase.Stopping -> Unit
             }
             XrayVpnStatus.Disconnected, XrayVpnStatus.Invalid -> onDisconnected(connection)
             XrayVpnStatus.Connecting, XrayVpnStatus.Reasserting, XrayVpnStatus.Disconnecting -> Unit
         }
+    }
+
+    private fun reportRunning(session: Long) {
+        generation = session
+        phase = Phase.Running
+        emit(XrayEngineEvent.Started(session))
     }
 
     private fun onDisconnected(connection: NEVPNConnection) {
@@ -171,20 +210,26 @@ public class XrayIosTunnelEngine(
             Phase.Idle, Phase.Preparing -> return
             Phase.Stopping -> emit(XrayEngineEvent.Stopped(generation))
             Phase.Launched, Phase.Running -> {
-                val kind = if (previous == Phase.Running) TunnelFailure.Kind.Fatal else TunnelFailure.Kind.StartFailed
                 val session = generation
-                connection.lastDisconnectError { error ->
-                    emit(
-                        if (error != null) {
-                            XrayEngineEvent.Failed(session, TunnelFailure(kind, error.failureText()))
-                        } else {
-                            XrayEngineEvent.Stopped(session)
-                        },
-                    )
-                }
+                val wasRunning = previous == Phase.Running
+                connection.lastDisconnectError { error -> emit(disconnectEvent(session, wasRunning, error)) }
             }
         }
         phase = Phase.Idle
+    }
+
+    // Without an error a running tunnel was stopped from outside (system settings, another VPN).
+    // A tunnel that never connected failed to start, whether or not the system kept an error.
+    private fun disconnectEvent(session: Long, wasRunning: Boolean, error: NSError?): XrayEngineEvent = when {
+        error != null -> {
+            val kind = if (wasRunning) TunnelFailure.Kind.Fatal else TunnelFailure.Kind.StartFailed
+            XrayEngineEvent.Failed(session, TunnelFailure(kind, error.failureText(), error.code.toInt()))
+        }
+        wasRunning -> XrayEngineEvent.Stopped(session)
+        else -> XrayEngineEvent.Failed(
+            session,
+            TunnelFailure(TunnelFailure.Kind.StartFailed, "disconnected before connecting"),
+        )
     }
 
     private fun emit(event: XrayEngineEvent) {

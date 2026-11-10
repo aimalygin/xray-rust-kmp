@@ -94,8 +94,8 @@ class MainActivity : Activity() {
     private fun TunnelState.label(): String = when (this) {
         TunnelState.Idle -> "Idle"
         is TunnelState.Connecting -> "Connecting (attempt $attempt)"
-        is TunnelState.Connected -> "Connected via $protocol"
-        is TunnelState.Failed -> "Failed: ${failure.message}"
+        is TunnelState.Connected -> "Connected via ${protocol ?: "a tunnel started elsewhere"}"
+        is TunnelState.Failed -> "Failed (${failure.kind}): ${failure.message}"
         TunnelState.Stopping -> "Stopping"
     }
 

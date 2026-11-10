@@ -11,6 +11,11 @@ import kotlin.time.Duration.Companion.seconds
 public data class TunnelPolicy(
     /** Start attempts per [XrayTunnel.start] or per failure of a running tunnel, including the first. */
     val maxStartAttempts: Int = 3,
+    /**
+     * How long one start attempt may stay silent. After that it counts as a failed attempt
+     * ([TunnelFailure.Kind.StartTimeout]) instead of leaving the tunnel in `Connecting` forever.
+     */
+    val startTimeout: Duration = 60.seconds,
     val initialBackoff: Duration = 1.seconds,
     val backoffMultiplier: Double = 2.0,
     val maxBackoff: Duration = 30.seconds,
@@ -27,6 +32,7 @@ public data class TunnelPolicy(
 ) {
     init {
         require(maxStartAttempts >= 1) { "maxStartAttempts must be at least 1" }
+        require(startTimeout.isPositive()) { "startTimeout must be positive" }
         require(backoffMultiplier >= 1.0) { "backoffMultiplier must be at least 1" }
         require(initialBackoff.isPositive() && maxBackoff >= initialBackoff) { "backoff bounds are invalid" }
     }
@@ -37,8 +43,11 @@ public data class TunnelPolicy(
         return minOf(initialBackoff * backoffMultiplier.pow(attempt - 2), maxBackoff)
     }
 
-    internal fun onFailure(attempt: Int, withoutRouting: Boolean): FailureDecision = when {
-        attempt < maxStartAttempts -> FailureDecision.Retry(attempt + 1, backoffBefore(attempt + 1))
+    /** A missing permission ends the start; a rejected config skips the retries of that same config. */
+    internal fun onFailure(attempt: Int, withoutRouting: Boolean, kind: TunnelFailure.Kind): FailureDecision = when {
+        kind == TunnelFailure.Kind.PermissionRequired -> FailureDecision.GiveUp
+        kind != TunnelFailure.Kind.ConfigRejected && attempt < maxStartAttempts ->
+            FailureDecision.Retry(attempt + 1, backoffBefore(attempt + 1))
         fallbackWithoutRouting && !withoutRouting -> FailureDecision.FallbackWithoutRouting
         else -> FailureDecision.GiveUp
     }

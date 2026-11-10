@@ -9,6 +9,7 @@ import kotlin.time.Duration.Companion.seconds
 
 class TunnelPolicyTest {
     private val policy = TunnelPolicy()
+    private val startFailed = TunnelFailure.Kind.StartFailed
 
     @Test
     fun backoffGrowsAndIsCapped() {
@@ -19,15 +20,26 @@ class TunnelPolicyTest {
 
     @Test
     fun defaultsRetryThenGiveUpWithoutFallback() {
-        assertEquals(FailureDecision.Retry(2, 1.seconds), policy.onFailure(attempt = 1, withoutRouting = false))
-        assertEquals(FailureDecision.GiveUp, policy.onFailure(attempt = 3, withoutRouting = false))
+        assertEquals(FailureDecision.Retry(2, 1.seconds), policy.onFailure(attempt = 1, withoutRouting = false, startFailed))
+        assertEquals(FailureDecision.GiveUp, policy.onFailure(attempt = 3, withoutRouting = false, startFailed))
+    }
+
+    @Test
+    fun missingPermissionAndRejectedConfigAreNotRetried() {
+        val optedIn = policy.copy(fallbackWithoutRouting = true)
+        val permission = TunnelFailure.Kind.PermissionRequired
+        val rejected = TunnelFailure.Kind.ConfigRejected
+        assertEquals(FailureDecision.GiveUp, optedIn.onFailure(attempt = 1, withoutRouting = false, permission))
+        assertEquals(FailureDecision.GiveUp, policy.onFailure(attempt = 1, withoutRouting = false, rejected))
+        assertEquals(FailureDecision.FallbackWithoutRouting, optedIn.onFailure(attempt = 1, withoutRouting = false, rejected))
+        assertEquals(FailureDecision.GiveUp, optedIn.onFailure(attempt = 1, withoutRouting = true, rejected))
     }
 
     @Test
     fun fallbackWithoutRoutingIsOptInAndUsedOnce() {
         val optedIn = policy.copy(fallbackWithoutRouting = true)
-        assertEquals(FailureDecision.FallbackWithoutRouting, optedIn.onFailure(attempt = 3, withoutRouting = false))
-        assertEquals(FailureDecision.GiveUp, optedIn.onFailure(attempt = 3, withoutRouting = true))
+        assertEquals(FailureDecision.FallbackWithoutRouting, optedIn.onFailure(attempt = 3, withoutRouting = false, startFailed))
+        assertEquals(FailureDecision.GiveUp, optedIn.onFailure(attempt = 3, withoutRouting = true, startFailed))
     }
 
     @Test
@@ -44,7 +56,7 @@ class XrayProtocolTest {
     fun detectsSchemesAndWireguardConfig() {
         assertEquals(XrayProtocol.Vless, XrayProtocol.detect(" VLESS://id@vpn.example.com:443"))
         assertEquals(XrayProtocol.Hysteria2, XrayProtocol.detect("hy2://auth@vpn.example.com"))
-        assertEquals(XrayProtocol.Shadowsocks2022, XrayProtocol.detect("ss://x@192.0.2.1:8388"))
+        assertEquals(XrayProtocol.Shadowsocks, XrayProtocol.detect("ss://x@192.0.2.1:8388"))
         assertEquals(XrayProtocol.Wireguard, XrayProtocol.detect("[Interface]\nPrivateKey = x"))
         assertEquals(null, XrayProtocol.detect("ftp://vpn.example.com"))
     }

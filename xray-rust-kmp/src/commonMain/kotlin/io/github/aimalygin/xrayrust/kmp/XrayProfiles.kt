@@ -14,7 +14,8 @@ public enum class XrayProtocol(
     Vless(coreFormat = null, importCapability = null),
     Vmess("vmess", XrayCapability.VmessOutbound),
     Trojan("trojan", XrayCapability.TrojanOutbound),
-    Shadowsocks2022("shadowsocks2022", XrayCapability.Shadowsocks2022Outbound),
+    // One core format for both families of `ss://` links: Shadowsocks 2022 and AEAD-2017.
+    Shadowsocks("shadowsocks2022", XrayCapability.Shadowsocks2022Outbound),
     Hysteria2("hysteria2", XrayCapability.Hysteria2Outbound),
     Wireguard("wireguard", XrayCapability.WireguardOutbound),
     Socks("socks", XrayCapability.SocksProfileImport),
@@ -26,7 +27,7 @@ public enum class XrayProtocol(
             "vless" to Vless,
             "vmess" to Vmess,
             "trojan" to Trojan,
-            "ss" to Shadowsocks2022,
+            "ss" to Shadowsocks,
             "hy2" to Hysteria2,
             "hysteria2" to Hysteria2,
             "socks" to Socks,

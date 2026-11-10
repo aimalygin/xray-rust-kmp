@@ -28,7 +28,7 @@ val profile = profiles.import("trojan://…").getOrThrow()
 // 3. Connect, and watch the state.
 tunnel.start(profile)
 tunnel.state.collect { state ->
-    // Idle → Connecting → Connected, or Failed with a reason
+    // Idle → Connecting → Connected, or Failed with a typed reason
 }
 
 tunnel.stop()
@@ -65,18 +65,19 @@ xray-rust-mobile, which is already tested on devices every release. Kotlin runs 
 | Import http, socks, trojan, shadowsocks2022, vmess, hysteria2, wireguard links (core importer) | ✅ | ✅ |
 | Import VLESS links | ✅ AAR importer | ✅ Swift importer, passed in from the app |
 | Start and stop the tunnel, observe its state | ✅ | ✅ |
-| Retries with backoff | ✅ | ✅ |
+| Retries with backoff, start timeout | ✅ | ✅ |
+| Show and stop a tunnel that was already running | not needed: same process | ✅ |
 | Stay connected when the network changes (Hysteria2, WireGuard) | ⚠️ see below | ✅ |
 | Run on a real device | not tested yet | not tested yet |
 
 - **VLESS** goes through the platform importers for now, because the core's
   `xray_profile_import_json` has no VLESS format yet.
-  [xray-rust#213](https://github.com/aimalygin/xray-rust/pull/213) adds it. Once that ships,
-  VLESS moves to the shared core path with no API change.
+  [xray-rust#213](https://github.com/aimalygin/xray-rust/pull/213) adds it (merged, not released
+  yet). Once a release ships it, VLESS moves to the shared core path with no API change.
 - **Network changes on Android:** `XrayVpnService` in xray-rust-mobile 0.9.0 does not run the
   network change coordinator and does not expose its core, so Hysteria2 and WireGuard cannot rebind
   yet. [xray-rust#214](https://github.com/aimalygin/xray-rust/pull/214) makes `XrayVpnService` rebind on
-  its own (opt-in). Details are in [docs/android.md](docs/android.md).
+  its own (opt-in); it is merged and waits for a release. Details are in [docs/android.md](docs/android.md).
 
 ## Your app decides the policy
 
@@ -88,6 +89,7 @@ val tunnel = XrayTunnel(
     engine, scope,
     policy = TunnelPolicy(
         maxStartAttempts = 3,            // default: 3 tries, 1 s → 30 s apart
+        startTimeout = 60.seconds,       // default: a silent start counts as a failed try
         restartOnNetworkChange = false,  // default: a restart drops every open connection
         fallbackWithoutRouting = false,  // default: off, because it changes where traffic goes
     ),

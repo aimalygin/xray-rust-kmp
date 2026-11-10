@@ -18,10 +18,17 @@ item, and calls `startVPNTunnel` with the same reference in `xrayConfigReference
 never goes into preferences or start options. App and extension must share a keychain access
 group (the sample's entitlements list `$(AppIdentifierPrefix)org.example.xraykmp.shared`).
 `NEVPNStatusDidChange` feeds `XrayIosTunnelEngine.status` (a `StateFlow`) and the engine events:
-Connected → `Started`; Disconnected after a stop → `Stopped`; Disconnected otherwise →
-`Failed` with the domain/code from `fetchLastDisconnectError` (iOS 16+), or `Stopped` if there is
-none. Network changes stay with the extension's observer, so `TunnelPolicy.restartOnNetworkChange`
-only matters for protocols without rebind.
+Connected → `Started`; Disconnected after a stop → `Stopped`; Disconnected otherwise → `Failed`
+with the domain/code from `fetchLastDisconnectError` (iOS 16+). Without an error, a tunnel that
+was running counts as stopped from outside (`Stopped`), and one that never connected as a failed
+start (`Failed`). Network changes stay with the extension's observer, so
+`TunnelPolicy.restartOnNetworkChange` only matters for protocols without rebind.
+
+The extension outlives the app. When the controller subscribes, the engine loads the saved
+manager and its status; a tunnel that is already up, or one the user switches on in the system
+settings later, is reported as `Started(XrayEngineEvent.EXTERNAL_SESSION)`, so the app shows it as
+connected and can stop it. The engine is main-thread only: its scope must dispatch on the main
+queue (the default `MainScope()` does).
 
 Swift sees a few helpers because Objective-C export has no default arguments, `Result` or flows:
 `profiles.importProfile(text:name:)` (throws), `SwiftInteropKt.createXrayTunnel(engine:)`,

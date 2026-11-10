@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -22,6 +23,7 @@ class XrayTunnelTest {
             private set
         var stops = 0
             private set
+        var stopFails = false
 
         fun emit(event: XrayEngineEvent) = eventFlow.tryEmit(event)
 
@@ -32,6 +34,7 @@ class XrayTunnelTest {
 
         override fun stop() {
             stops++
+            check(!stopFails) { "stop refused" }
         }
 
         override fun rebindsOnNetworkChange(protocol: XrayProtocol): Boolean = protocol in rebound
@@ -157,6 +160,133 @@ class XrayTunnelTest {
         tunnel.start(profile(XrayProtocol.Vmess))
         runCurrent()
         send(engine, stale)
+        assertEquals(TunnelState.Connecting(attempt = 1), tunnel.state.value)
+    }
+
+    @Test
+    fun silentStartTimesOutAndIsRetried() = runTest(timeout = 10.seconds) {
+        val engine = FakeEngine()
+        val tunnel = tunnel(engine, TunnelPolicy(maxStartAttempts = 2, startTimeout = 5.seconds))
+        tunnel.start(profile(XrayProtocol.Trojan))
+        runCurrent()
+        val abandoned = engine.started()
+        advanceTimeBy(5.seconds)
+        runCurrent()
+        assertEquals(TunnelState.Connecting(attempt = 2), tunnel.state.value)
+        assertEquals(1, engine.stops)
+        send(engine, abandoned)
+        assertEquals(TunnelState.Connecting(attempt = 2), tunnel.state.value)
+        advanceTimeBy(1.seconds)
+        runCurrent()
+        assertEquals(2, engine.started.size)
+        advanceTimeBy(5.seconds)
+        runCurrent()
+        val timeout = TunnelFailure(TunnelFailure.Kind.StartTimeout, "start timed out")
+        assertEquals(TunnelState.Failed(timeout), tunnel.state.value)
+    }
+
+    @Test
+    fun startedTunnelIsNotTimedOut() = runTest(timeout = 10.seconds) {
+        val engine = FakeEngine()
+        val tunnel = tunnel(engine, TunnelPolicy(startTimeout = 5.seconds))
+        tunnel.start(profile(XrayProtocol.Trojan))
+        runCurrent()
+        send(engine, engine.started())
+        advanceTimeBy(6.seconds)
+        runCurrent()
+        assertEquals(TunnelState.Connected(XrayProtocol.Trojan), tunnel.state.value)
+        assertEquals(0, engine.stops)
+    }
+
+    @Test
+    fun externalSessionIsAdoptedAndCanBeStopped() = runTest(timeout = 10.seconds) {
+        val engine = FakeEngine()
+        val tunnel = tunnel(engine, TunnelPolicy(restartOnNetworkChange = true))
+        send(engine, XrayEngineEvent.Started(XrayEngineEvent.EXTERNAL_SESSION))
+        assertEquals(TunnelState.Connected(protocol = null), tunnel.state.value)
+        tunnel.onNetworkChanged()
+        runCurrent()
+        assertEquals(0, engine.started.size)
+        tunnel.stop()
+        runCurrent()
+        assertEquals(TunnelState.Stopping, tunnel.state.value)
+        assertEquals(1, engine.stops)
+        send(engine, XrayEngineEvent.Stopped(XrayEngineEvent.EXTERNAL_SESSION))
+        assertEquals(TunnelState.Idle, tunnel.state.value)
+    }
+
+    @Test
+    fun externalSessionThatFailsIsNotRestarted() = runTest(timeout = 10.seconds) {
+        val engine = FakeEngine()
+        val tunnel = tunnel(engine)
+        send(engine, XrayEngineEvent.Started(XrayEngineEvent.EXTERNAL_SESSION))
+        val fatal = TunnelFailure(TunnelFailure.Kind.Fatal, "boom")
+        send(engine, XrayEngineEvent.Failed(XrayEngineEvent.EXTERNAL_SESSION, fatal))
+        assertEquals(TunnelState.Failed(fatal), tunnel.state.value)
+        assertEquals(0, engine.started.size)
+    }
+
+    @Test
+    fun externalStartDoesNotReplaceOwnAttempt() = runTest(timeout = 10.seconds) {
+        val engine = FakeEngine()
+        val tunnel = tunnel(engine)
+        tunnel.start(profile(XrayProtocol.Trojan))
+        runCurrent()
+        send(engine, XrayEngineEvent.Started(XrayEngineEvent.EXTERNAL_SESSION))
+        assertEquals(TunnelState.Connecting(attempt = 1), tunnel.state.value)
+    }
+
+    @Test
+    fun missingPermissionIsNotRetried() = runTest(timeout = 10.seconds) {
+        val engine = FakeEngine()
+        val tunnel = tunnel(engine)
+        tunnel.start(profile(XrayProtocol.Trojan))
+        runCurrent()
+        val denied = TunnelFailure(TunnelFailure.Kind.PermissionRequired, "no consent")
+        send(engine, XrayEngineEvent.Failed(engine.generation, denied))
+        assertEquals(TunnelState.Failed(denied), tunnel.state.value)
+        assertEquals(1, engine.started.size)
+    }
+
+    @Test
+    fun rejectedConfigSkipsRetriesAndGoesToFallback() = runTest(timeout = 10.seconds) {
+        val engine = FakeEngine()
+        val tunnel = tunnel(engine, TunnelPolicy(fallbackWithoutRouting = true))
+        tunnel.start(profile(XrayProtocol.Trojan))
+        runCurrent()
+        val rejected = TunnelFailure(TunnelFailure.Kind.ConfigRejected, "XrayCoreException", code = 3)
+        send(engine, XrayEngineEvent.Failed(engine.generation, rejected))
+        assertEquals(TunnelState.Connecting(attempt = 3, withoutRouting = true), tunnel.state.value)
+        send(engine, XrayEngineEvent.Failed(engine.generation, rejected))
+        assertEquals(TunnelState.Failed(rejected), tunnel.state.value)
+    }
+
+    @Test
+    fun engineThatCannotStopLeavesTunnelIdle() = runTest(timeout = 10.seconds) {
+        val engine = FakeEngine()
+        val tunnel = tunnel(engine)
+        tunnel.start(profile(XrayProtocol.Trojan))
+        runCurrent()
+        send(engine, engine.started())
+        engine.stopFails = true
+        tunnel.stop()
+        runCurrent()
+        assertEquals(TunnelState.Idle, tunnel.state.value)
+        tunnel.start(profile(XrayProtocol.Trojan))
+        runCurrent()
+        assertEquals(TunnelState.Connecting(attempt = 1), tunnel.state.value)
+    }
+
+    @Test
+    fun unparsableConfigFailsWithoutBreakingTheController() = runTest(timeout = 10.seconds) {
+        val engine = FakeEngine()
+        val tunnel = tunnel(engine, TunnelPolicy(maxStartAttempts = 1, fallbackWithoutRouting = true))
+        tunnel.start(XrayProfile("broken", "vpn.example.com", XrayProtocol.Trojan, configJson = "[]"))
+        runCurrent()
+        send(engine, engine.failed())
+        assertIs<TunnelState.Failed>(tunnel.state.value)
+        tunnel.start(profile(XrayProtocol.Trojan))
+        runCurrent()
         assertEquals(TunnelState.Connecting(attempt = 1), tunnel.state.value)
     }
 
