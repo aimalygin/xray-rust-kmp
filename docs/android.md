@@ -15,24 +15,29 @@ handles the queued starts and stops in the order they were issued. Two consequen
 - A stop always lands: if the system refuses the wake-up intent (background start restrictions),
   the engine hands the stop to the live service directly.
 
-`XrayVpnService` 0.9.0 does not call `startForeground`, and neither does `XrayKmpVpnService`.
+`XrayVpnService` (xray-rust-mobile 0.10.0) does not call `startForeground`, and neither does `XrayKmpVpnService`.
 An app that wants the tunnel to outlive its UI promotes the service to the foreground in a
 subclass (notification, `FOREGROUND_SERVICE` permission and a service type). The sample does not.
 Always-on VPN is not supported yet: a start by the system carries no config.
 
-`XrayVpnService` 0.9.0 ignores a start while an earlier start is still running, and a stop during
-startup cancels it without a callback. `XraySessionSequencer` (unit-tested, used by
-`XrayKmpVpnService`) therefore never cancels a start in flight: a newer start or a stop waits until it reports (started or failed) and then replaces or
-stops it; only destroying the service cancels it at once. A "replace session" call or a cancel
-callback in xray-rust-mobile would remove that wait.
+`XraySessionSequencer` (unit-tested, used by `XrayKmpVpnService`) never cancels a start in
+flight: a newer start or a stop waits until it reports (started or failed) and then replaces or
+stops it; only destroying the service cancels it at once. xray-rust-mobile 0.9.0 needed that wait,
+because it ignored a start while an earlier one was still running and cancelled a start during
+startup without a callback. `XrayVpnService` 0.10.0 replaces a start in flight and reports
+`onXrayTunnelStartCancelled`; `XrayKmpVpnService` does not use that yet, and the wait stays
+correct with it.
 
-Known gap: in xray-rust-mobile 0.9.0 `XrayVpnService` does not run `XrayNetworkChangeCoordinator`
-and does not expose its `XrayCore`, so a service built on it gets no Hysteria2/WireGuard rebind
-yet; `AndroidTunnelEngine` reports no rebind, and `restartOnNetworkChange = true` restarts these
-protocols too. Closing it needs a hook in xray-rust-mobile (for example, a callback with the started core),
-not a second coordinator here.
+Network changes: `XrayVpnService` 0.10.0 can rebind the tunnel's carrier on its own when the
+network changes ([xray-rust#214](https://github.com/aimalygin/xray-rust/pull/214); opt-in through
+`networkChangeRebindEnabled()`, which needs `ACCESS_NETWORK_STATE` in the app manifest).
+`XrayKmpVpnService` does not opt in, because the rebind has not been tested through this library
+on a device across a Wi-Fi/cellular change. So
+`AndroidTunnelEngine` reports no rebind, and `restartOnNetworkChange = true` restarts every
+protocol. A subclass that turns the rebind on itself should keep `restartOnNetworkChange = false`,
+since the engine still reports no rebind and the controller would restart a tunnel the service has
+just moved.
 
-[xray-rust#214](https://github.com/aimalygin/xray-rust/pull/214) adds both to `XrayVpnService`: an opt-in
-network-change rebind and start replacement with an `onXrayTunnelStartCancelled` callback. It is
-merged but not released yet. Once a xray-rust-mobile release ships it, `AndroidTunnelEngine` reports rebind and `XrayKmpVpnService` drops
-the wait.
+Since xray-rust-mobile 0.10.0 the service also reports a file-descriptor read or write loop that
+stopped as `onXrayTunnelFatalError`, so `TunnelFailure.Kind.Fatal` and the policy's restart can now
+happen on Android with the default backend.

@@ -23,8 +23,8 @@ import java.util.concurrent.atomic.AtomicReference
  * do not pass through system_server. The service must run in the process that owns
  * [AndroidTunnelEngine]: declared with another `android:process`, it never sees a command.
  *
- * `XrayVpnService` 0.9.0 does not call `startForeground`. An app that wants the tunnel to
- * outlive its UI promotes the service itself, in a subclass.
+ * `XrayVpnService` (xray-rust-mobile 0.10.0) does not call `startForeground`. An app that wants
+ * the tunnel to outlive its UI promotes the service itself, in a subclass.
  */
 public open class XrayKmpVpnService : XrayVpnService() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -180,8 +180,9 @@ public class AndroidTunnelEngine(
         }
     }
 
-    // XrayVpnService 0.9.0 neither runs XrayNetworkChangeCoordinator nor exposes its core, so no
-    // protocol is rebound here; TunnelPolicy.restartOnNetworkChange decides for all of them.
+    // XrayKmpVpnService does not opt in to the network-change rebind of XrayVpnService 0.10.0
+    // (networkChangeRebindEnabled()), so no protocol is rebound here;
+    // TunnelPolicy.restartOnNetworkChange decides for all of them.
     override fun rebindsOnNetworkChange(protocol: XrayProtocol): Boolean = false
 
     private fun wakeService() {

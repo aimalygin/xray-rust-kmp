@@ -94,17 +94,23 @@ class XrayProtocolTest {
 class XrayRuntimeTest {
     private val required = XrayRuntime.requiredCapabilities.sumOf { it.mask }
 
+    // Relative to the pin, so moving release/mobile.env to a newer ABI does not need test edits.
+    private val binding = XrayRuntime.bindingAbi
+
     @Test
     fun acceptsBindingAbiAndNewerMinor() {
-        assertEquals(XrayCompatibility.Compatible, XrayRuntime.checkCompatibility(XrayRuntimeInfo(XrayAbiVersion(1, 15), required)))
-        assertEquals(XrayCompatibility.Compatible, XrayRuntime.checkCompatibility(XrayRuntimeInfo(XrayAbiVersion(1, 16), required)))
+        assertEquals(XrayCompatibility.Compatible, XrayRuntime.checkCompatibility(XrayRuntimeInfo(binding, required)))
+        val newerMinor = XrayAbiVersion(binding.major, binding.minor + 1)
+        assertEquals(XrayCompatibility.Compatible, XrayRuntime.checkCompatibility(XrayRuntimeInfo(newerMinor, required)))
     }
 
     @Test
     fun rejectsOlderMinorOtherMajorAndMissingCapabilities() {
-        assertIs<XrayCompatibility.Incompatible>(XrayRuntime.checkCompatibility(XrayRuntimeInfo(XrayAbiVersion(1, 14), required)))
-        assertIs<XrayCompatibility.Incompatible>(XrayRuntime.checkCompatibility(XrayRuntimeInfo(XrayAbiVersion(2, 0), required)))
-        assertIs<XrayCompatibility.Incompatible>(XrayRuntime.checkCompatibility(XrayRuntimeInfo(XrayAbiVersion(1, 15), 0)))
+        val olderMinor = XrayAbiVersion(binding.major, binding.minor - 1)
+        assertIs<XrayCompatibility.Incompatible>(XrayRuntime.checkCompatibility(XrayRuntimeInfo(olderMinor, required)))
+        val nextMajor = XrayAbiVersion(binding.major + 1, 0)
+        assertIs<XrayCompatibility.Incompatible>(XrayRuntime.checkCompatibility(XrayRuntimeInfo(nextMajor, required)))
+        assertIs<XrayCompatibility.Incompatible>(XrayRuntime.checkCompatibility(XrayRuntimeInfo(binding, 0)))
     }
 
     @Test

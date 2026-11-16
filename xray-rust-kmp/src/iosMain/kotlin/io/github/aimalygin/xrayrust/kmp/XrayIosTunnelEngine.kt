@@ -246,7 +246,7 @@ public class XrayIosTunnelEngine(
     }
 }
 
-// XrayTunnelProviderMessage.providerConfigReferenceKey / configReferenceOptionKey at xray-rust-mobile 0.9.0.
+// XrayTunnelProviderMessage.providerConfigReferenceKey / configReferenceOptionKey at xray-rust-mobile 0.10.0.
 private const val PROVIDER_CONFIG_REFERENCE_KEY = "configReference"
 private const val OPTION_CONFIG_REFERENCE_KEY = "xrayConfigReference"
 

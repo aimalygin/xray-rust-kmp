@@ -10,10 +10,12 @@ internal sealed interface XrayServiceCommand {
 }
 
 /**
- * Orders starts and stops for `XrayVpnService` 0.9.0, which ignores a start issued while an
- * earlier one is still starting and cancels a start in flight without any callback. So a start in
- * flight is never cancelled here: a newer start or a stop waits until it reports, then replaces
- * or stops it. Not thread-safe: the service calls it on the main thread only.
+ * Orders starts and stops for `XrayVpnService`. A start in flight is never cancelled here: a newer
+ * start or a stop waits until it reports, then replaces or stops it. xray-rust-mobile 0.9.0 needed
+ * that wait (it ignored a start issued during a start and cancelled a start in flight without any
+ * callback). 0.10.0 replaces a start in flight and reports `onXrayTunnelStartCancelled`; this
+ * sequencer does not use that yet, and its wait stays correct there. Not thread-safe: the service
+ * calls it on the main thread only.
  */
 internal class XraySessionSequencer(
     private val startTunnel: (configJson: String) -> Unit,
