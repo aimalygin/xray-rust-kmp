@@ -8,10 +8,12 @@ an AAR for Android and an XCFramework plus Swift package for iOS. This library s
 gives Kotlin Multiplatform apps a single API for both, so the tunnel logic lives in shared code.
 
 > [!NOTE]
-> **Status: early, not released.** This is step 1 of
-> [xray-rust#197](https://github.com/aimalygin/xray-rust/issues/197): the library builds against
-> the published xray-rust-mobile 0.9.0, and a sample app uses it on both platforms. The API is open
-> for discussion. Nothing is on Maven Central yet.
+> **Status: early.** Version 0.10.0 is released as the tag `v0.10.0` and a GitHub release of this
+> repository. It is built against xray-rust-mobile 0.10.0 (xray-rust core 0.10.0, C ABI 1.17).
+> It is **not on Maven Central**: you build it from a checkout of the tag (see
+> [Use it in your project](#use-it-in-your-project)). The API is open for discussion and may
+> change in a later release. The library has not been run on a real device yet. It started as
+> step 1 of [xray-rust#197](https://github.com/aimalygin/xray-rust/issues/197).
 
 ## What it looks like
 
@@ -55,7 +57,8 @@ On iOS it is `XrayIosTunnelEngine(...)`, which talks to the system VPN through `
 
 On iOS the tunnel runs in a separate process, the Network Extension, which has a tight memory
 limit. That process stays pure Swift: one line subclassing `XrayPacketTunnelProvider` from
-xray-rust-mobile, which is already tested on devices every release. Kotlin runs only in the app.
+xray-rust-mobile, the SDK's own provider (its release notes say what was tested on devices).
+Kotlin runs only in the app.
 
 ## What works today
 
@@ -70,14 +73,68 @@ xray-rust-mobile, which is already tested on devices every release. Kotlin runs 
 | Stay connected when the network changes (Hysteria2, WireGuard) | ⚠️ see below | ✅ |
 | Run on a real device | not tested yet | not tested yet |
 
-- **VLESS** goes through the platform importers for now, because the core's
-  `xray_profile_import_json` has no VLESS format yet.
-  [xray-rust#213](https://github.com/aimalygin/xray-rust/pull/213) adds it (merged, not released
-  yet). Once a release ships it, VLESS moves to the shared core path with no API change.
-- **Network changes on Android:** `XrayVpnService` in xray-rust-mobile 0.9.0 does not run the
-  network change coordinator and does not expose its core, so Hysteria2 and WireGuard cannot rebind
-  yet. [xray-rust#214](https://github.com/aimalygin/xray-rust/pull/214) makes `XrayVpnService` rebind on
-  its own (opt-in); it is merged and waits for a release. Details are in [docs/android.md](docs/android.md).
+What 0.10.0 of this library does not use yet from xray-rust-mobile 0.10.0:
+
+- **VLESS through the core.** The core's `xray_profile_import_json` accepts `"format":"vless"`
+  since xray-rust 0.10.0 ([xray-rust#213](https://github.com/aimalygin/xray-rust/pull/213)), but
+  this library still imports VLESS links with the platform importers, as in the table. Moving to
+  the core changes which parser reads a link (the SDK documents that the two can disagree on the
+  same link) and leaves the `vlessImporter` parameter without a job, so it waits for a later
+  release. Details are in [docs/api.md](docs/api.md#vless).
+- **Network-change rebind on Android.** `XrayVpnService` 0.10.0 can rebind on its own when the
+  network changes ([xray-rust#214](https://github.com/aimalygin/xray-rust/pull/214), opt-in through
+  `networkChangeRebindEnabled()`), but `XrayKmpVpnService` does not opt in: that needs a test on a
+  device across a Wi-Fi/cellular change. Until then `AndroidTunnelEngine` reports no rebind.
+  Details are in [docs/android.md](docs/android.md).
+- **Start replacement on Android.** `XrayVpnService` 0.10.0 can replace a start in flight and
+  reports `onXrayTunnelStartCancelled`. `XrayKmpVpnService` still waits for a start to report
+  before it replaces or stops it, which stays correct.
+- **TUN MTU.** The SDK lets the host choose the TUN MTU (ABI 1.16); this library has no option for
+  it and runs at the default 1500.
+
+## Use it in your project
+
+The library is not published to Maven Central or any other Maven repository. Build it from a
+checkout of the release tag, as the samples in this repository do.
+
+```sh
+git clone --branch v0.10.0 https://github.com/aimalygin/xray-rust-kmp.git
+```
+
+**Gradle (Android and shared Kotlin).** Include the checkout as a
+[composite build](https://docs.gradle.org/current/userguide/composite_builds.html) and depend on
+the library's coordinates; Gradle builds it from source instead of looking for it in a repository.
+
+```kotlin
+// settings.gradle.kts
+includeBuild("../xray-rust-kmp")
+
+// build.gradle.kts of your shared module
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            implementation("io.github.aimalygin:xray-rust-kmp:0.10.0")
+        }
+    }
+}
+```
+
+The included build needs network access on its first run: it fetches the pinned xray-rust-mobile
+AAR from Maven Central and the XCFramework and C header from the xray-rust-mobile 0.10.0 release,
+and checks each against [`release/mobile.env`](release/mobile.env). Your build must also resolve
+`io.github.aimalygin:xray-rust-mobile:0.10.0` from Maven Central, since the library depends on it.
+This setup was checked with the same Kotlin (2.4.21) and Android Gradle plugin (9.5.1) versions as
+this repository ([`gradle/libs.versions.toml`](gradle/libs.versions.toml)), compiling for Android
+and linking iOS frameworks for both targets.
+
+**iOS.** A shared module that builds its own iOS framework gets the library, and the core
+embedded in it, linked into that framework like any Kotlin dependency. An app can instead use this
+library's own framework, `XrayRustKmp`, built and embedded from Xcode with
+`./gradlew :xray-rust-kmp:embedAndSignAppleFrameworkForXcode`, as
+[`samples/ios/project.yml`](samples/ios/project.yml) does. Either way, add the Swift package
+`https://github.com/aimalygin/xray-rust-mobile` at exactly `0.10.0`: the Network Extension uses its
+`XrayAppleTunnel` product, the app its pure-Swift `XrayAppleShared` (keychain config store, VLESS
+importer). [docs/ios.md](docs/ios.md) explains the split.
 
 ## Your app decides the policy
 
@@ -124,13 +181,14 @@ the Simulator, so to connect on iOS set your signing team and run on a device.
 The library pins one xray-rust-mobile release in [`release/mobile.env`](release/mobile.env):
 the version and the checksums of the AAR, the XCFramework and the C header. The build downloads
 exactly those files and fails if any checksum differs. Updating xray-rust-mobile means changing
-that one file.
+that file and the SwiftPM `exactVersion` in `samples/ios/project.yml`, which `generate.sh` checks
+against it.
 
 ## Repository layout
 
 | Path | What it is |
 |---|---|
-| `xray-rust-kmp/` | The library, `io.github.aimalygin:xray-rust-kmp` (Android, `iosArm64`, `iosSimulatorArm64`) |
+| `xray-rust-kmp/` | The library, `io.github.aimalygin:xray-rust-kmp:0.10.0` (Android, `iosArm64`, `iosSimulatorArm64`) |
 | `samples/android/`, `samples/ios/` | Minimal sample apps |
 | `release/mobile.env` | The pinned xray-rust-mobile release |
 | `docs/` | [API reference](docs/api.md), [Android notes](docs/android.md), [iOS notes](docs/ios.md) |

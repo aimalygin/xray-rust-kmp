@@ -1,10 +1,10 @@
-# API reference (step 1)
+# API reference (0.10.0)
 
-The API is a proposal for discussion on the step-1 pull request.
+The API is open for discussion and may change in a later release.
 
 - `XrayRuntime.info()` reads `xray_ffi_version_major/minor` and the capability mask of the loaded
   native library. `XrayRuntime.checkCompatibility()` / `requireCompatible()` fail with a reason when
-  the runtime is older than the ABI the binding is built against (1.15, xray-rust-mobile 0.9.0) or
+  the runtime is older than the ABI the binding is built against (1.17, xray-rust-mobile 0.10.0) or
   lacks a required capability.
 - `XrayProfiles().import(text): Result<XrayProfile>` detects the protocol and routes it explicitly:
   every format `xray_profile_import_json` supports (http, socks,
@@ -41,10 +41,15 @@ The API is a proposal for discussion on the step-1 pull request.
 
 ## VLESS
 
-`xray_profile_import_json` in xray-rust-mobile 0.9.0 has no `"format":"vless"`
-([xray-rust#213](https://github.com/aimalygin/xray-rust/pull/213) adds it; merged, not released yet).
-Until a release ships it, VLESS links go through
-the platform importers: `XrayVlessUrlImporter` from the AAR on Android, and on iOS the Swift
-`XrayVlessURLImporter`, handed to `XrayProfiles(vlessImporter = …)` as an `XrayLinkImporter`.
-Once the core accepts VLESS, `XrayProtocol.Vless` gets its core format and capability and every
-platform switches to the core path with no API change.
+In 0.10.0 of this library VLESS links go through the platform importers: `XrayVlessUrlImporter`
+from the AAR on Android, and on iOS the Swift `XrayVlessURLImporter`, handed to
+`XrayProfiles(vlessImporter = …)` as an `XrayLinkImporter`.
+
+xray-rust-mobile 0.10.0 (ABI 1.17) also imports VLESS through the core: `xray_profile_import_json`
+accepts `"format":"vless"` ([xray-rust#213](https://github.com/aimalygin/xray-rust/pull/213)) under
+the `VLESS_PROFILE_IMPORT` capability. This library does not use that path yet. Switching
+`XrayProtocol.Vless` to it would change which parser reads a link (the SDK documents that the core
+importer and the platform parsers can disagree on the same link) and leave `vlessImporter`,
+`XrayLinkImporter` and `XrayImportException.Reason.NoPlatformImporter` without a job, so it is left
+for a later release together with a decision on that API. `XrayCapability` lists the bits up to
+ABI 1.15; the two that ABI 1.16 and 1.17 add (`TUN_MTU`, `VLESS_PROFILE_IMPORT`) are not in it yet.

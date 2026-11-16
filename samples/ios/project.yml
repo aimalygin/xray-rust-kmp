@@ -16,7 +16,7 @@ packages:
   XrayRustMobile:
     url: https://github.com/aimalygin/xray-rust-mobile
     # Keep equal to XRAY_RUST_MOBILE_VERSION in release/mobile.env (generate.sh checks it).
-    exactVersion: 0.9.0
+    exactVersion: 0.10.0
 targets:
   App:
     type: application
