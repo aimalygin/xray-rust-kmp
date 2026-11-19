@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "io.github.aimalygin"
-version = "0.10.0"
+version = "0.10.1"
 
 val mobileEnv: Provider<Map<String, String>> = providers
     .fileContents(isolated.rootProject.projectDirectory.file("release/mobile.env"))

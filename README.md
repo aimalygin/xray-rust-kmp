@@ -8,8 +8,8 @@ an AAR for Android and an XCFramework plus Swift package for iOS. This library s
 gives Kotlin Multiplatform apps a single API for both, so the tunnel logic lives in shared code.
 
 > [!NOTE]
-> **Status: early.** Version 0.10.0 is released as the tag `v0.10.0` and a GitHub release of this
-> repository. It is built against xray-rust-mobile 0.10.0 (xray-rust core 0.10.0, C ABI 1.17).
+> **Status: early.** Version 0.10.1 is released as the tag `v0.10.1` and a GitHub release of this
+> repository. It is built against xray-rust-mobile 0.10.1 (xray-rust core 0.10.1, C ABI 1.17).
 > It is **not on Maven Central**: you build it from a checkout of the tag (see
 > [Use it in your project](#use-it-in-your-project)). The API is open for discussion and may
 > change in a later release. The library has not been run on a real device yet. It started as
@@ -73,7 +73,7 @@ Kotlin runs only in the app.
 | Stay connected when the network changes (Hysteria2, WireGuard) | ⚠️ see below | ✅ |
 | Run on a real device | not tested yet | not tested yet |
 
-What 0.10.0 of this library does not use yet from xray-rust-mobile 0.10.0:
+What 0.10.1 of this library does not use yet from xray-rust-mobile 0.10.1:
 
 - **VLESS through the core.** The core's `xray_profile_import_json` accepts `"format":"vless"`
   since xray-rust 0.10.0 ([xray-rust#213](https://github.com/aimalygin/xray-rust/pull/213)), but
@@ -98,7 +98,7 @@ The library is not published to Maven Central or any other Maven repository. Bui
 checkout of the release tag, as the samples in this repository do.
 
 ```sh
-git clone --branch v0.10.0 https://github.com/aimalygin/xray-rust-kmp.git
+git clone --branch v0.10.1 https://github.com/aimalygin/xray-rust-kmp.git
 ```
 
 **Gradle (Android and shared Kotlin).** Include the checkout as a
@@ -113,16 +113,16 @@ includeBuild("../xray-rust-kmp")
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("io.github.aimalygin:xray-rust-kmp:0.10.0")
+            implementation("io.github.aimalygin:xray-rust-kmp:0.10.1")
         }
     }
 }
 ```
 
 The included build needs network access on its first run: it fetches the pinned xray-rust-mobile
-AAR from Maven Central and the XCFramework and C header from the xray-rust-mobile 0.10.0 release,
+AAR from Maven Central and the XCFramework and C header from the xray-rust-mobile 0.10.1 release,
 and checks each against [`release/mobile.env`](release/mobile.env). Your build must also resolve
-`io.github.aimalygin:xray-rust-mobile:0.10.0` from Maven Central, since the library depends on it.
+`io.github.aimalygin:xray-rust-mobile:0.10.1` from Maven Central, since the library depends on it.
 This setup was checked with the same Kotlin (2.4.21) and Android Gradle plugin (9.5.1) versions as
 this repository ([`gradle/libs.versions.toml`](gradle/libs.versions.toml)), compiling for Android
 and linking iOS frameworks for both targets.
@@ -132,7 +132,7 @@ embedded in it, linked into that framework like any Kotlin dependency. An app ca
 library's own framework, `XrayRustKmp`, built and embedded from Xcode with
 `./gradlew :xray-rust-kmp:embedAndSignAppleFrameworkForXcode`, as
 [`samples/ios/project.yml`](samples/ios/project.yml) does. Either way, add the Swift package
-`https://github.com/aimalygin/xray-rust-mobile` at exactly `0.10.0`: the Network Extension uses its
+`https://github.com/aimalygin/xray-rust-mobile` at exactly `0.10.1`: the Network Extension uses its
 `XrayAppleTunnel` product, the app its pure-Swift `XrayAppleShared` (keychain config store, VLESS
 importer). [docs/ios.md](docs/ios.md) explains the split.
 
@@ -188,7 +188,7 @@ against it.
 
 | Path | What it is |
 |---|---|
-| `xray-rust-kmp/` | The library, `io.github.aimalygin:xray-rust-kmp:0.10.0` (Android, `iosArm64`, `iosSimulatorArm64`) |
+| `xray-rust-kmp/` | The library, `io.github.aimalygin:xray-rust-kmp:0.10.1` (Android, `iosArm64`, `iosSimulatorArm64`) |
 | `samples/android/`, `samples/ios/` | Minimal sample apps |
 | `release/mobile.env` | The pinned xray-rust-mobile release |
 | `docs/` | [API reference](docs/api.md), [Android notes](docs/android.md), [iOS notes](docs/ios.md) |

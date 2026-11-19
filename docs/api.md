@@ -1,10 +1,10 @@
-# API reference (0.10.0)
+# API reference (0.10.1)
 
 The API is open for discussion and may change in a later release.
 
 - `XrayRuntime.info()` reads `xray_ffi_version_major/minor` and the capability mask of the loaded
   native library. `XrayRuntime.checkCompatibility()` / `requireCompatible()` fail with a reason when
-  the runtime is older than the ABI the binding is built against (1.17, xray-rust-mobile 0.10.0) or
+  the runtime is older than the ABI the binding is built against (1.17, xray-rust-mobile 0.10.1) or
   lacks a required capability.
 - `XrayProfiles().import(text): Result<XrayProfile>` detects the protocol and routes it explicitly:
   every format `xray_profile_import_json` supports (http, socks,
