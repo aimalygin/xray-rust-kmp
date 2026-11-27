@@ -39,6 +39,9 @@ public enum class XrayCapability(public val bit: Int) {
     SocksProfileImport(26),
     HttpProfileImport(27),
     OutboundProbeCancel(28),
+    TunMtu(29),
+    VlessProfileImport(30),
+    RuntimeWorkerThreads(31),
     ;
 
     public val mask: Long get() = 1L shl bit

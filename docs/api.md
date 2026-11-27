@@ -33,6 +33,14 @@ The API is open for discussion and may change in a later release.
   policy; `ConfigRejected` (the core refused the config) skips the retries of that same config and
   goes straight to the fallback or to `Failed`; `PermissionRequired` (no VPN consent on Android)
   ends the start at once.
+- Runtime worker threads (ABI 1.18): the library does not choose how many threads the core's
+  runtime uses. The app sets it where its platform creates the core, by overriding
+  `runtimeWorkerThreads()` in its `XrayKmpVpnService` subclass on Android or in its
+  `PacketTunnelProvider` on iOS (1 to 64; `null`/`nil` keeps the core's default). Both overrides
+  come with the xray-rust-mobile release that carries
+  [xray-rust#384](https://github.com/aimalygin/xray-rust/pull/384); with an older pin they do not
+  exist. `XrayRuntime.info().supports(XrayCapability.RuntimeWorkerThreads)` tells whether the
+  linked core has the setting.
 - A tunnel the library did not start (already up when the app launched, or switched on in the
   system settings) is reported by the engine as `Started(XrayEngineEvent.EXTERNAL_SESSION)`. The
   controller adopts it: the state becomes `Connected(protocol = null)` and `stop()` works. It has
@@ -51,5 +59,6 @@ the `VLESS_PROFILE_IMPORT` capability. This library does not use that path yet. 
 `XrayProtocol.Vless` to it would change which parser reads a link (the SDK documents that the core
 importer and the platform parsers can disagree on the same link) and leave `vlessImporter`,
 `XrayLinkImporter` and `XrayImportException.Reason.NoPlatformImporter` without a job, so it is left
-for a later release together with a decision on that API. `XrayCapability` lists the bits up to
-ABI 1.15; the two that ABI 1.16 and 1.17 add (`TUN_MTU`, `VLESS_PROFILE_IMPORT`) are not in it yet.
+for a later release together with a decision on that API. `XrayCapability` lists every bit up to
+ABI 1.18, including `TUN_MTU` (1.16), `VLESS_PROFILE_IMPORT` (1.17) and `RUNTIME_WORKER_THREADS`
+(1.18).

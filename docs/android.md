@@ -38,6 +38,13 @@ protocol. A subclass that turns the rebind on itself should keep `restartOnNetwo
 since the engine still reports no rebind and the controller would restart a tunnel the service has
 just moved.
 
+Worker threads: from the xray-rust-mobile release that carries
+[xray-rust#384](https://github.com/aimalygin/xray-rust/pull/384) (ABI 1.18), `XrayVpnService` reads
+`runtimeWorkerThreads()` once per start and gives it to every core the start creates. Override it
+in your subclass of `XrayKmpVpnService` to run the core on fewer threads (1 to 64; `null`, the
+default, keeps the core's count). The socket-protect callback runs on a runtime worker, so measure
+throughput with a burst of new connections before you lower it.
+
 Since xray-rust-mobile 0.10.0 the service also reports a file-descriptor read or write loop that
 stopped as `onXrayTunnelFatalError`, so `TunnelFailure.Kind.Fatal` and the policy's restart can now
 happen on Android with the default backend.
