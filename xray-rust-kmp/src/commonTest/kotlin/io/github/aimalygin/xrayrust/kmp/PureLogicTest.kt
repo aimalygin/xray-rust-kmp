@@ -126,6 +126,16 @@ class XrayRuntimeTest {
     }
 
     @Test
+    fun abi116To118BitsMatchHeader() {
+        assertEquals(1L shl 29, XrayCapability.TunMtu.mask)
+        assertEquals(1L shl 30, XrayCapability.VlessProfileImport.mask)
+        // A 64-bit macro in xray_ffi.h, since a C enum constant cannot hold it; positive as a Long.
+        assertEquals(0x8000_0000L, XrayCapability.RuntimeWorkerThreads.mask)
+        val info = XrayRuntimeInfo(XrayAbiVersion(1, 18), (1L shl 18) or (1L shl 31))
+        assertEquals(setOf(XrayCapability.ProfileImport, XrayCapability.RuntimeWorkerThreads), info.capabilities)
+    }
+
+    @Test
     fun fallbackConfigDropsOnlyRouting() {
         val stripped = configWithoutRouting("""{"outbounds":[{"tag":"proxy"}],"routing":{"rules":[]}}""")
         assertEquals("""{"outbounds":[{"tag":"proxy"}]}""", stripped)

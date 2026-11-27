@@ -7,6 +7,16 @@ The split follows the process boundary:
 | App | Kotlin/Native framework `XrayRustKmp` + Swift UI | Runtime check, profile import (`xray_profile_import_json` through cinterop), `XrayTunnel` state machine and policy, `XrayIosTunnelEngine` driving `NETunnelProviderManager` |
 | Network Extension | Swift only: `final class PacketTunnelProvider: XrayPacketTunnelProvider {}` from the SwiftPM product `XrayAppleTunnel` | TUN pump, utun fd, tunnel DNS settings, network observer with Hysteria2/WireGuard rebind; the SDK's own provider, whose release notes say what was tested on devices |
 
+To choose how many threads the core's runtime uses (ABI 1.18, from the xray-rust-mobile release that
+carries [xray-rust#384](https://github.com/aimalygin/xray-rust/pull/384)), override the provider's
+hook in the extension; `nil`, the default, keeps the core's count:
+
+```swift
+final class PacketTunnelProvider: XrayPacketTunnelProvider {
+    override func runtimeWorkerThreads() throws -> UInt32? { 2 }
+}
+```
+
 No Kotlin/Native runtime is loaded in the extension (Network Extension memory limit), and the
 extension code is not reimplemented in Kotlin.
 
